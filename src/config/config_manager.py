@@ -1,161 +1,76 @@
-"""Configuration manager for WeChat Task Automation System."""
+from __future__ import annotations
 
 import os
-import re
-from pathlib import Path
-from typing import Optional
-
+from typing import Any, Dict
 import yaml
-from pydantic import ValidationError
-
-from .models import AppConfig
 
 
 class ConfigManager:
-    """
-    Configuration manager that loads config.yaml and supports environment variable overrides.
-    
-    Environment variables are referenced in config.yaml using ${VAR_NAME} or ${VAR_NAME:-default}
-    syntax. These are resolved at runtime.
-    """
-    
-    def __init__(self, config_path: Optional[str] = None):
-        """
-        Initialize the configuration manager.
-        
-        Args:
-            config_path: Path to config.yaml. If None, looks for config/config.yaml
-                        in the project root.
-        """
-        if config_path is None:
-            # Look for config.yaml in project root or ./config/
-            project_root = Path(__file__).parent.parent.parent
-            possible_paths = [
-                project_root / "config" / "config.yaml",
-                project_root / "config.yaml",
-                Path("config/config.yaml"),
-                Path("config.yaml"),
-            ]
-            for path in possible_paths:
-                if path.exists():
-                    config_path = str(path)
-                    break
-            else:
-                raise FileNotFoundError(
-                    f"config.yaml not found in any of: {[str(p) for p in possible_paths]}"
-                )
-        
-        self.config_path = config_path
-        self._config: Optional[AppConfig] = None
-        self._load()
-    
-    def _resolve_env_vars(self, value: str) -> str:
-        """
-        Resolve environment variables in a string.
-        
-        Supports ${VAR_NAME} and ${VAR_NAME:-default} syntax.
-        """
-        if not isinstance(value, str):
-            return value
-        
-        # Pattern matches ${VAR} or ${VAR:-default}
-        pattern = r'\$\{([^}:]+)(?::-([^}]*))?\}'
-        
-        def replacer(match):
-            var_name = match.group(1)
-            default = match.group(2) if match.group(2) is not None else ""
-            return os.environ.get(var_name, default)
-        
-        return re.sub(pattern, replacer, value)
-    
-    def _resolve_dict(self, d: dict) -> dict:
-        """Recursively resolve environment variables in a dictionary."""
-        result = {}
-        for key, value in d.items():
-            if isinstance(value, dict):
-                result[key] = self._resolve_dict(value)
-            elif isinstance(value, str):
-                result[key] = self._resolve_env_vars(value)
-            elif isinstance(value, list):
-                result[key] = [
-                    self._resolve_env_vars(item) if isinstance(item, str) else item
-                    for item in value
-                ]
-            else:
-                result[key] = value
-        return result
-    
-    def _load(self):
-        """Load and validate the configuration."""
-        with open(self.config_path, 'r', encoding='utf-8') as f:
-            raw_config = yaml.safe_load(f)
-        
-        # Resolve environment variables
-        resolved_config = self._resolve_dict(raw_config)
-        
-        # Validate with Pydantic
-        try:
-            self._config = AppConfig(**resolved_config)
-        except ValidationError as e:
-            raise ValueError(f"Configuration validation failed: {e}")
-    
-    def reload(self):
-        """Reload configuration from file."""
-        self._load()
-    
-    @property
-    def wechat(self):
-        """Get WeChat configuration."""
-        return self._config.wechat
-    
-    @property
-    def llm(self):
-        """Get LLM routing configuration."""
-        return self._config.llm
-    
-    @property
-    def opencode(self):
-        """Get OpenCode configuration."""
-        return self._config.opencode
-    
-    @property
-    def feishu(self):
-        """Get Feishu configuration."""
-        return self._config.feishu
-    
-    @property
-    def task_filters(self):
-        """Get task filter configuration."""
-        return self._config.task_filters
-    
-    @property
-    def workflow(self):
-        """Get workflow configuration."""
-        return self._config.workflow
-    
-    @property
-    def logging(self):
-        """Get logging configuration."""
-        return self._config.logging
-    
-    @property
-    def health_check(self):
-        """Get health check configuration."""
-        return self._config.health_check
-    
-    @property
-    def config(self):
-        """Get the full configuration object."""
-        return self._config
+    """Minimal configuration manager with YAML + environment variable overrides."""
 
+    def __init__(self, config_path: str | None = None) -> None:
+        self.config_path = config_path or os.path.join("config", "config.yaml")
+        self._config: Dict[str, Any] = {}
+        self.load()
 
-# Singleton instance
-_instance: Optional[ConfigManager] = None
+    def load(self) -> None:
+        # Load YAML config if present
+        if os.path.exists(self.config_path):
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                try:
+                    data = yaml.safe_load(f) or {}
+                except Exception:
+                    data = {}
+        else:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        self._config = data
 
+        # Merge environment overrides
+        self._merge_env("WECHAT_DEVICE_ID", path=["wechat"], key="device_id")
+        self._merge_env("OLLAMA_BASE_URL", path=["llm"], key="ollama_base_url")
+        self._merge_env("ANTHROPIC_API_KEY", path=["llm"], key="anthropic_api_key")
+        self._merge_env("OPENAI_API_KEY", path=["llm"], key="openai_api_key")
+        self._merge_env("FEISHU_APP_ID", path=["feishu"], key="app_id")
+        self._merge_env("FEISHU_APP_SECRET", path=["feishu"], key="app_secret")
+        self._merge_env("FEISHU_TABLE_ID", path=["feishu"], key="table_id")
 
-def get_config() -> ConfigManager:
-    """Get the global configuration instance."""
-    global _instance
-    if _instance is None:
-        _instance = ConfigManager()
-    return _instance
+    def _merge_env(self, env_key: str, path: list[str], key: str) -> None:
+        if env_key in os.environ:
+            ref = self._config
+            for p in path[:-1]:
+                ref = ref.setdefault(p, {})
+            ref[path[-1]] = os.environ[env_key]
+
+    def get(self, section: str, key: str, default: Any = None) -> Any:
+        return self._config.get(section, {}).get(key, default)
+
+    # Convenience accessors
+    @property
+    def wechat_device_id(self) -> str:
+        return self.get("wechat", "device_id", "")
+
+    @property
+    def ollama_base_url(self) -> str:
+        return self.get("llm", "ollama_base_url", "")
+
+    @property
+    def anthropic_api_key(self) -> str:
+        return self.get("llm", "anthropic_api_key", "")
+
+    @property
+    def openai_api_key(self) -> str:
+        return self.get("llm", "openai_api_key", "")
+
+    @property
+    def feishu_app_id(self) -> str:
+        return self.get("feishu", "app_id", "")
+
+    @property
+    def feishu_app_secret(self) -> str:
+        return self.get("feishu", "app_secret", "")
+
+    @property
+    def feishu_table_id(self) -> str:
+        return self.get("feishu", "table_id", "")
