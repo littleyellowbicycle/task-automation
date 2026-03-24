@@ -1,0 +1,93 @@
+# 企业微信任务自动化配置
+
+# WeChat (NtWork) 配置
+wechat:
+  device_id: "${WECHAT_DEVICE_ID}"
+  ip: "${WECHAT_IP:-127.0.0.1}"
+  port: ${WECHAT_PORT:-5037}
+  auto_reconnect: true
+  reconnect_interval: 5
+  message_queue_size: 100
+
+# LLM 路由配置
+llm:
+  default_provider: "${LLM_DEFAULT_PROVIDER:-ollama}"
+  complexity_threshold: "${LLM_COMPLEXITY_THRESHOLD:-medium}"
+  
+  ollama:
+    base_url: "${OLLAMA_BASE_URL:-http://localhost:11434}"
+    model: "${OLLAMA_MODEL:-llama3.2}"
+    timeout: ${OLLAMA_TIMEOUT:-120}
+    stream: true
+  
+  anthropic:
+    api_key: "${ANTHROPIC_API_KEY}"
+    model: "${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
+    max_tokens: 4096
+  
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    model: "${OPENAI_MODEL:-gpt-4o}"
+    max_tokens: 4096
+
+# OpenCode 执行器配置
+opencode:
+  host: "${OPENCODE_HOST:-localhost}"
+  port: ${OPENCODE_PORT:-18792}
+  work_dir: "${OPENCODE_WORK_DIR:-/tmp/opencode_workspace}"
+  timeout: ${OPENCODE_TIMEOUT:-600}
+  allowed_commands:
+    - "create"
+    - "modify"
+    - "read"
+  forbidden_paths:
+    - "/etc"
+    - "/root"
+    - "/sys"
+    - "/proc"
+
+# 飞书配置
+feishu:
+  app_id: "${FEISHU_APP_ID}"
+  app_secret: "${FEISHU_APP_SECRET}"
+  table_id: "${FEISHU_TABLE_ID}"
+  token_refresh_buffer: 300
+
+# 任务过滤关键词
+task_filters:
+  keywords:
+    - "项目发布"
+    - "需求"
+    - "开发任务"
+    - "功能开发"
+    - "bug修复"
+    - "重构"
+  regex_patterns:
+    - "^项目发布[:：]"
+    - "^需求[:：]"
+    - "^开发[:：]"
+
+# 工作流配置
+workflow:
+  confirm_timeout: ${WORKFLOW_CONFIRM_TIMEOUT:-300}
+  max_concurrent_tasks: ${WORKFLOW_MAX_CONCURRENT_TASKS:-3}
+  retry_attempts: ${WORKFLOW_RETRY_ATTEMPTS:-3}
+  retry_delay: 5
+
+# 日志配置
+logging:
+  level: "${LOG_LEVEL:-INFO}"
+  dir: "${LOG_DIR:-./logs}"
+  rotation:
+    max_size: "100 MB"
+    retention: "7 days"
+  format: "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+
+# 健康检查
+health_check:
+  enabled: true
+  interval: 60
+  components:
+    - wechat
+    - llm
+    - feishu

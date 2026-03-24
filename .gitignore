@@ -1,0 +1,66 @@
+# Python bytecode - compiled Python files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Build outputs - generated during installation/build
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment - local Python environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE - editor-specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables - NEVER commit secrets/API keys
+.env
+.env.local
+.env.*.local
+
+# Logs - runtime/debug logs
+logs/
+*.log
+
+# Testing - test cache and coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# OS - system-specific files
+.DS_Store
+Thumbs.db
+
+# Workspace - temporary files from development tools
+workspace/
+tmp/
+temp/
+
+# Credentials - sensitive key files
+*.pem
+*.key
+credentials.json
