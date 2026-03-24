@@ -1,171 +1,288 @@
-# 企业微信任务自动化系统
+# 企业微信任务自动化系统 - 项目规划
 
-基于企业微信群消息的自动化任务交付系统，使用 LLM 分析 + OpenCode 执行 + 飞书记录。
+> 从企业微信群捕获任务消息 → LLM分析 → 用户确认 → OpenCode执行 → 飞书记录
 
-## 功能特性
+## 一、项目目标
 
-- ✅ 企业微信群消息实时捕获
-- ✅ 智能任务识别 (关键词 + 正则)
-- ✅ LLM 自动分析生成摘要
-- ✅ 用户确认机制
-- ✅ OpenCode 自动代码生成
-- ✅ 飞书多维表格同步记录
-- ✅ 混合 LLM 调度 (本地 + 云端)
-- ✅ 完善的错误处理和日志
+构建一个自动化流水线：从企业微信群捕获任务消息 → LLM分析 → 用户确认 → OpenCode执行代码生成 → 飞书多维表格记录
 
-## 系统要求
+## 二、技术架构
 
-- Windows 10/11
-- Python 3.10+
-- 企业微信 Windows 客户端
-- Docker (用于 Ollama，本地模型)
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           用户 (你)                                         │
+│                  确认/取消任务 │  查看飞书记录                               │
+└───────────────────────────────┬─────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      主流程编排器 (WorkflowOrchestrator)                     │
+│    状态机管理 │ 事件驱动 │ 错误恢复 │ 日志记录                              │
+└──────────┬──────────┬──────────┬──────────┬──────────┬────────────────────┘
+           │          │          │          │          │
+           ▼          ▼          ▼          ▼          ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│  Webhook     │ │   LLM        │ │    任务      │ │   OpenCode   │ │    飞书      │
+│  消息接收    │ │   调度器     │ │    分析器    │ │   执行器     │ │    记录器    │
+│              │ │              │ │              │ │              │ │              │
+│  FastAPI     │ │  Ollama+     │ │  消息解析    │ │  代码生成    │ │  多维表格    │
+│  端点        │ │  Claude路由  │ │  摘要生成    │ │  执行        │ │  记录        │
+└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
+```
 
-## 快速开始
+## 三、核心模块
 
-### 1. 克隆项目
+| 模块 | 职责 | 关键类/函数 |
+|------|------|-------------|
+| **wechat_listener** | 接收企微群消息 | `WebhookServer`, `MessageParser` |
+| **llm_router** | LLM智能路由 (本地/云端) | `LLMRouter`, `OllamaProvider`, `ClaudeProvider` |
+| **task_analyzer** | 任务分析和摘要提取 | `TaskAnalyzer` |
+| **code_executor** | OpenCode调用封装 | `CodeExecutor` |
+| **feishu_recorder** | 飞书多维表格记录 | `FeishuClient`, `TaskRecord` |
+| **decision_manager** | 用户决策确认 | `DecisionManager` |
+| **workflow_orchestrator** | 主流程编排 | `WorkflowOrchestrator` |
+| **config** | 配置和日志管理 | `ConfigManager` |
+
+## 四、完整流程
+
+```
+1️⃣ 捕获消息
+┌─────────────┐
+│ 企微群机器人 │ ──POST──→ Webhook服务器 ──→ 消息解析
+└─────────────┘
+     │
+     ▼
+2️⃣ 过滤识别
+┌─────────────────────────────────────┐
+│ 关键词: "项目发布"、"需求"、"开发任务" │ ── 匹配 ──→ 进入处理流程
+│ 排除词: "测试"、"内部"              │ ── 匹配 ──→ 忽略
+└─────────────────────────────────────┘
+     │
+     ▼
+3️⃣ LLM分析
+┌─────────────────────────────────────┐
+│ • 提取需求摘要 (50字内)             │
+│ • 识别技术栈 (Python/React/...)     │
+│ • 提取核心功能点                    │
+│ • 评估复杂度 (simple/medium/complex)│
+└─────────────────────────────────────┘
+     │
+     ▼
+4️⃣ 用户确认
+┌─────────────────────────────────────┐
+│ 发送确认消息到企微私聊:             │
+│ 📋 任务摘要: xxx                    │
+│ 🛠️ 技术栈: xxx                      │
+│ ⚡ 功能点: xxx                       │
+│                                     │
+│ 回复 "确认" 执行 / "取消" 终止      │
+│ ⏱️ 超时: 5分钟                       │
+└─────────────────────────────────────┘
+     │
+     ▼
+5️⃣ OpenCode执行
+┌─────────────────────────────────────┐
+│ • 转换任务为OpenCode指令            │
+│ • 设置工作目录                      │
+│ • 执行代码生成                      │
+│ • 捕获执行结果和仓库链接            │
+└─────────────────────────────────────┘
+     │
+     ▼
+6️⃣ 飞书记录
+┌─────────────────────────────────────┐
+│ 多维表格记录:                        │
+│ • task_id: 任务ID                   │
+│ • raw_message: 原始消息             │
+│ • summary: LLM摘要                  │
+│ • tech_stack: 技术栈                │
+│ • status: 状态流转                  │
+│ • code_repo_url: 代码仓库链接        │
+│ • created_at/updated_at: 时间       │
+└─────────────────────────────────────┘
+```
+
+## 五、LLM混合调度策略
+
+### 复杂度判断规则
+
+| 复杂度 | 判断条件 | 路由 |
+|--------|----------|------|
+| **Simple** | 单一功能、明确技术栈、无复杂逻辑 | Ollama (本地) |
+| **Medium** | 2-3个功能点、需技术选型 | Ollama (本地) |
+| **Complex** | 多功能、复杂逻辑、需要架构设计 | Claude (云端) |
+
+### Fallback机制
+如果Ollama不可用，自动切换到Claude/GPT云端API。
+
+## 六、消息过滤规则
+
+```yaml
+wechat:
+  filter:
+    include:
+      - "项目发布"
+      - "需求"
+      - "开发任务"
+      - "新功能"
+      - "做一个"
+    exclude:
+      - "测试"
+      - "[内部]"
+      - "demo"
+```
+
+## 七、飞书多维表格结构
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| task_id | 文本 | 任务唯一ID (UUID) |
+| raw_message | 文本 | 原始消息内容 |
+| summary | 文本 | LLM生成的摘要 |
+| tech_stack | 多选 | 技术栈列表 |
+| core_features | 多选 | 核心功能点 |
+| status | 单选 | pending/approved/executing/completed/failed |
+| code_repo_url | 链接 | 代码仓库链接 |
+| created_at | 创建时间 | 创建时间 |
+| updated_at | 修改时间 | 更新时间 |
+
+### 状态流转
+```
+pending → approved → executing → completed
+                   ↘           → failed
+                     (取消)
+```
+
+## 八、配置管理
+
+所有敏感信息通过环境变量管理：
 
 ```bash
-git clone <repository-url>
-cd wechat-task-automation
+# 飞书
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=xxx
+FEISHU_TABLE_ID=xxx
+
+# LLM - Claude
+ANTHROPIC_API_KEY=sk-ant-xxx
+
+# LLM - OpenAI (备用)
+OPENAI_API_KEY=sk-xxx
+
+# Ollama (本地)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Webhook
+WECHAT_HOOK_TOKEN=xxx
 ```
 
-### 2. 创建虚拟环境
+## 九、部署架构
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-.venv\Scripts\activate     # Windows
-```
+### 方案A: 云服务器 (推荐长期)
 
-### 3. 安装依赖
+云服务器 (1核1G, ~30元/月)
+├── TaskLoop应用 (FastAPI, 端口: 8080)
+├── Ollama (可选, 本地LLM, 端口: 11434)
+└── 公网IP/域名 → 企微Webhooks回调
 
-```bash
-pip install -r requirements.txt
-```
+### 方案B: 本地 + 内网穿透 (免费)
 
-### 4. 配置
+你的电脑 → 内网穿透工具 (frp/ngrok) → 公网URL → 企微Webhooks回调
 
-```bash
-cp .env.example .env
-# 编辑 .env 填入你的配置
-```
+### 免费内网穿透工具
 
-主要配置项：
-- `WECHAT_DEVICE_ID`: 企业微信设备 ID
-- `OLLAMA_BASE_URL`: Ollama 服务地址 (可选)
-- `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`: 云端 LLM API Key
-- `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_TABLE_ID`: 飞书配置
+| 工具 | 免费额度 | 适合场景 |
+|------|----------|----------|
+| ngrok | 1个隧道/分钟断开 | 开发测试 |
+| cpolar | 随机URL | 临时使用 |
+| frp | 完全免费 | 自建穿透 |
+| Cloudflare Tunnel | 免费 | 长期稳定 |
 
-### 5. 启动 Ollama (可选，本地 LLM)
-
-```bash
-docker run -d -p 11434:11434 ollama/ollama
-ollama pull llama3.2
-```
-
-### 6. 运行
-
-```bash
-python main.py
-```
-
-## 使用流程
-
-1. **消息捕获**: 系统监控企业微信群消息
-2. **任务识别**: 自动识别包含关键词的消息 (项目发布、需求等)
-3. **LLM 分析**: 使用 LLM 提取技术栈、功能点、约束条件
-4. **用户确认**: 发送确认消息到私聊，用户回复"确认"执行
-5. **代码生成**: OpenCode 根据指令生成代码
-6. **结果记录**: 自动同步到飞书多维表格
-
-## 命令行参数
-
-```bash
-python main.py [选项]
-
-选项:
-  --mode MODE         运行模式: normal, test, mock (默认: normal)
-  --dry-run          不实际执行代码生成
-  --config PATH      指定配置文件路径
-  --log-level LEVEL  日志级别: DEBUG, INFO, WARNING, ERROR
-```
-
-## 配置说明
-
-### config/config.yaml
-
-主配置文件，支持以下配置块：
-
-| 配置块 | 说明 |
-|--------|------|
-| wechat | 企业微信连接配置 |
-| llm | LLM 提供商配置 (Ollama, Anthropic, OpenAI) |
-| opencode | OpenCode 执行器配置 |
-| feishu | 飞书应用配置 |
-| task_filters | 任务关键词过滤配置 |
-| workflow | 工作流参数配置 |
-| logging | 日志配置 |
-
-### 环境变量
-
-配置文件中的 `${VAR}` 或 `${VAR:-default}` 语法会自动从环境变量读取。
-
-## 目录结构
+## 十、文件结构
 
 ```
-.
+TaskLoop/
 ├── src/
 │   ├── config/              # 配置管理
-│   │   ├── models.py        # Pydantic 模型
-│   │   └── config_manager.py
-│   ├── wechat_listener/     # 企业微信消息监听
-│   │   ├── models.py        # 消息模型
-│   │   ├── parser.py        # 消息解析
-│   │   └── listener.py      # 监听器
-│   ├── llm_router/          # LLM 路由
-│   │   ├── providers.py     # 抽象基类
-│   │   ├── ollama_provider.py
-│   │   ├── cloud_provider.py
-│   │   └── router.py
-│   ├── task_analyzer/       # 任务分析器
-│   ├── code_executor/       # OpenCode 封装
+│   │   ├── __init__.py
+│   │   └── manager.py      # ConfigManager
+│   ├── wechat_listener/    # Webhook接收
+│   │   ├── __init__.py
+│   │   ├── server.py       # FastAPI服务器
+│   │   └── parser.py       # 消息解析
+│   ├── llm_router/          # LLM调度
+│   │   ├── __init__.py
+│   │   ├── base.py         # 抽象基类
+│   │   ├── ollama.py       # Ollama Provider
+│   │   ├── anthropic.py   # Claude Provider
+│   │   └── router.py       # 路由逻辑
+│   ├── task_analyzer/       # 任务分析
+│   │   ├── __init__.py
+│   │   └── analyzer.py     # TaskAnalyzer
+│   ├── code_executor/       # OpenCode执行
+│   │   ├── __init__.py
+│   │   └── executor.py     # CodeExecutor
 │   ├── feishu_recorder/     # 飞书记录
+│   │   ├── __init__.py
+│   │   ├── client.py       # FeishuClient
+│   │   └── models.py       # TaskRecord
 │   ├── decision_manager/    # 决策确认
+│   │   ├── __init__.py
+│   │   └── manager.py      # DecisionManager
 │   ├── workflow_orchestrator/ # 流程编排
-│   ├── exceptions/          # 异常定义
-│   └── utils/               # 工具函数
+│   │   ├── __init__.py
+│   │   └── orchestrator.py # WorkflowOrchestrator
+│   ├── utils/               # 工具函数
+│   │   └── __init__.py
+│   └── exceptions/          # 异常定义
+│       └── __init__.py
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── docs/
 ├── config/
 │   └── config.yaml
-├── tests/
-├── CLAUDE.md                # OpenCode 项目上下文
+├── CLAUDE.md               # OpenCode上下文
+├── README.md
 ├── requirements.txt
-└── main.py
+├── .env.example
+└── main.py                 # 入口
 ```
 
-## 测试
+## 十一、关键决策记录
 
-```bash
-# 运行所有测试
-pytest tests/ -v
+| 决策项 | 选择 | 理由 |
+|--------|------|------|
+| 消息捕获 | Webhook | 官方支持、无封号风险、只需新消息 |
+| 代码Agent | OpenCode | 开源、多模型支持、本地LLM友好 |
+| LLM | 混合方案 | 简单任务用Ollama(免费快)、复杂用Claude |
+| 环境 | Windows | 符合用户环境 |
+| 规模 | 个人使用 | 无需复杂权限管理 |
 
-# 带覆盖率
-pytest tests/ -v --cov=src --cov-report=html
+## 十二、技术栈
 
-# Mock 模式测试
-python main.py --mode mock
-```
+| 类别 | 技术 | 版本 |
+|------|------|------|
+| Web框架 | FastAPI | >=0.109.0 |
+| 飞书SDK | lark-oapi | >=1.3.0 |
+| LLM SDK | openai, anthropic | >=1.12.0, >=0.20.0 |
+| 配置 | pydantic, pyyaml | >=2.6.0, >=6.0.1 |
+| 日志 | loguru | >=0.7.2 |
+| 测试 | pytest | >=8.0.0 |
 
-## 常见问题
+## 十三、安全考虑
 
-### Q: 企业微信消息捕获失败
-A: 确保企业微信 Windows 客户端已登录，设备 ID 已正确配置。
+### Webhook安全
+- ✅ 使用签名验证 (msg_signature)
+- ✅ 频率限制 (20条/分钟)
+- ✅ 不获取用户隐私信息
 
-### Q: LLM 调用失败
-A: 检查网络连接和 API Key 配置。Ollama 服务需要手动启动。
+### 凭证管理
+- ✅ 所有凭证通过环境变量管理
+- ✅ 不硬编码任何密钥
+- ✅ .env文件加入.gitignore
 
-### Q: 飞书记录失败
-A: 确认飞书应用已开通多维表格权限，Table ID 正确。
-
-## License
-
-MIT
+### 执行安全
+- ✅ 命令白名单
+- ✅ 路径限制
+- ✅ 危险操作拦截
