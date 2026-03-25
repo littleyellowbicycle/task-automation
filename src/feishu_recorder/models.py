@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from datetime import datetime
 from typing import List, Optional
 
+
+class TaskStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    EXECUTING = "EXECUTING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
 @dataclass
 class TaskRecord:
@@ -12,7 +20,7 @@ class TaskRecord:
     summary: str
     tech_stack: List[str]
     core_features: List[str]
-    status: str  # e.g., 'pending', 'approved', 'executing', 'completed', 'failed'
+    status: TaskStatus  # e.g., PENDING, APPROVED, EXECUTING, COMPLETED, FAILED
     code_repo_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

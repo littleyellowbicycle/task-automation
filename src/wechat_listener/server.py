@@ -3,8 +3,14 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 import logging
 from typing import Any, Dict
+from queue import Queue
 
 app = FastAPI(title="WeChat Webhook Receiver")
+
+# Lightweight in-process queue for task messages emitted by webhook
+_message_queue: Queue = Queue()
+from .parser import MessageParser
+from .models import WeChatMessage, TaskMessage
 
 
 def _extract_message(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -25,7 +31,12 @@ async def wechat_webhook(request: Request) -> Dict[str, Any]:
         payload = await request.json()
     except Exception:
         payload = {}
-    message = _extract_message(payload)
-    logging.info(f"WeChat webhook received: {payload!r} -> parsed: {message!r}")
-    # In a real setup, forward to asynchronous processing pipeline here
-    return {"ok": True, "message": message}
+    # Lightweight parsing using the in-module parser
+    parser = MessageParser()
+    wechat_message: WeChatMessage = parser.parse(payload)
+    # Build a task message if applicable
+    task_msg: TaskMessage = parser.parse_task_message(wechat_message)
+    if task_msg.is_project_task:
+        _message_queue.put(task_msg)
+        logging.info(f"Queued task message {task_msg.original_message.msg_id}")
+    return {"ok": True, "task_id": getattr(task_msg.original_message, 'msg_id', '')}

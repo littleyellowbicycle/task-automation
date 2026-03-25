@@ -15,3 +15,6 @@ class FeishuClient:
 
     def create_record(self, record: TaskRecord) -> bool:
         return True
+
+    def update_status(self, task_id: str, new_status: str) -> bool:
+        return True
