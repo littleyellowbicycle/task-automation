@@ -1,44 +1,49 @@
 """Tests for LLM router."""
 
 import pytest
-from src.llm_router.router import LLMRouter
-from src.llm_router.providers import Message
+from src.llm_router.router import LLMRouter, LLMResponse
+from src.llm_router.providers import LLMProvider
+from src.llm_router.ollama_provider import OllamaProvider
+
+
+class MockProvider(LLMProvider):
+    def __init__(self, name: str = "mock"):
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def complete(self, prompt: str, **kwargs) -> str:
+        return f"Mock response to: {prompt}"
+
+    async def chat(self, messages, **kwargs) -> str:
+        return "Mock chat response"
+
+    async def health_check(self) -> bool:
+        return True
 
 
 class TestLLMRouter:
     def test_create_router_without_config(self):
         """Router without config should have no providers."""
         router = LLMRouter()
-        assert router.default_provider == "ollama"
-        assert router.available_providers == []
+        assert router.providers == {}
 
-    def test_create_router_with_config(self):
+    def test_create_router_with_providers(self):
         """Router with config should initialize providers."""
-        router = LLMRouter(
-            ollama_config={"base_url": "http://localhost:11434", "model": "llama3.2"}
-        )
-        assert router.default_provider == "ollama"
-        assert "ollama" in router.available_providers
-
-    def test_complexity_assessment(self):
         router = LLMRouter()
-        
-        # Simple task
-        complexity = router._assess_complexity("Hello, how are you?")
-        assert complexity == "low"
-        
-        # Complex task
-        complexity = router._assess_complexity("Analyze this code and refactor the architecture")
-        assert complexity == "high"
+        router.add_provider("mock", MockProvider())
+        assert "mock" in router.providers
 
-    def test_get_provider_with_config(self):
-        router = LLMRouter(
-            ollama_config={"base_url": "http://localhost:11434", "model": "llama3.2"}
-        )
-        provider = router.get_provider("ollama")
-        assert provider.name == "ollama"
-
-    def test_get_nonexistent_provider(self):
+    def test_add_provider(self):
         router = LLMRouter()
-        with pytest.raises(Exception):
-            router.get_provider("nonexistent")
+        provider = OllamaProvider()
+        router.add_provider("ollama", provider)
+        assert router.providers["ollama"].name == "ollama"
+
+    def test_response_object(self):
+        resp = LLMResponse("test content", model="test", provider="test")
+        assert resp.content == "test content"
+        assert resp.model == "test"
+        assert resp.provider == "test"

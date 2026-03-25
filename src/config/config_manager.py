@@ -38,9 +38,9 @@ class ConfigManager:
     def _merge_env(self, env_key: str, path: List[str], key: str) -> None:
         if env_key in os.environ:
             ref = self._config
-            for p in path[:-1]:
+            for p in path:
                 ref = ref.setdefault(p, {})
-            ref[path[-1]] = os.environ[env_key]
+            ref[key] = os.environ[env_key]
 
     def set_defaults(self) -> None:
         defaults = {
@@ -70,6 +70,10 @@ class ConfigManager:
         return self._config.get("logging", {}).get("level", "INFO")
 
     @property
+    def ollama_base_url(self) -> str:
+        return self._config.get("llm", {}).get("ollama_base_url", "")
+
+    @property
     def wechat(self) -> SimpleNamespace:
         w = self._config.get("wechat", {})
         return SimpleNamespace(device_id=w.get("device_id", ""), ip=w.get("ip", "127.0.0.1"), port=w.get("port", 5037))
@@ -81,3 +85,6 @@ class ConfigManager:
 
     def get(self, section: str, key: str, default: Any = None) -> Any:
         return self._config.get(section, {}).get(key, default)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return dict(self._config)
