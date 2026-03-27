@@ -1,0 +1,26 @@
+wechat:
+  device_id: "dev-12345"
+  ip: "127.0.0.1"
+  port: 5037
+llm:
+  ollama_base_url: "http://localhost:11434"
+  anthropic_api_key: ""
+  openai_api_key: ""
+opencode: {}
+feishu:
+  app_id: ""
+  app_secret: ""
+  table_id: ""
+workflow:
+  mode: "normal"
+  log_level: "INFO"
+logging:
+  dir: "logs"
+  level: "INFO"
+  format: "%(levelname)s:%(name)s:%(message)s"
+task_filters:
+  keywords:
+    - "项目发布"
+    - "需求"
+    - "开发任务"
+  regex_patterns: []
