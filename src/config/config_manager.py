@@ -76,7 +76,12 @@ class ConfigManager:
     @property
     def wechat(self) -> SimpleNamespace:
         w = self._config.get("wechat", {})
-        return SimpleNamespace(device_id=w.get("device_id", ""), ip=w.get("ip", "127.0.0.1"), port=w.get("port", 5037))
+        return SimpleNamespace(
+            device_id=w.get("device_id", ""),
+            ip=w.get("ip", "127.0.0.1"),
+            port=w.get("port", 5037),
+            smart_mode=w.get("smart_mode", True),
+        )
 
     @property
     def task_filters(self) -> SimpleNamespace:

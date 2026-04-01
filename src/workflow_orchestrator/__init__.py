@@ -11,7 +11,7 @@ from ..llm_router.router import LLMRouter
 from ..task_analyzer import TaskAnalyzer
 from ..code_executor import CodeExecutor
 from ..feishu_recorder.client import FeishuClient
-from ..decision_manager import DecisionManager, ConfirmationResult
+from ..decision_manager import DecisionManager, ConfirmationResult, Decision
 from ..utils import get_logger
 from ..exceptions import WorkflowError
 
@@ -59,7 +59,7 @@ class WorkflowOrchestrator:
         
         # Initialize components
         self.llm_router = llm_router or LLMRouter()
-        self.task_analyzer = TaskAnalyzer(self.llm_router)
+        self.task_analyzer = TaskAnalyzer()
         self.code_executor = code_executor or CodeExecutor()
         self.feishu_client = feishu_client or FeishuClient()
         self.decision_manager = decision_manager or DecisionManager()
@@ -97,38 +97,38 @@ class WorkflowOrchestrator:
         logger.info(f"Starting workflow for task message: {task_message.original_message.msg_id}")
         
         try:
-            # Step 1: Create initial task record
             self.state = WorkflowState.CAPTURING
+            
+            analysis = self.task_analyzer.analyze(task_message.raw_text)
+            
             task_record = TaskRecord(
                 task_id=f"task_{hash(task_message.original_message.content) % 1000000}",
                 raw_message=task_message.original_message.content,
+                summary=analysis.get("summary", ""),
+                tech_stack=analysis.get("tech_stack", []),
+                core_features=analysis.get("core_features", []),
+                status=TaskStatus.PENDING,
                 user_id=task_message.original_message.sender_id,
                 user_name=task_message.original_message.sender_name,
             )
             self.current_task = task_record
             await self._trigger_event("on_task_captured", task_record)
             
-            # Step 2: Analyze with LLM
             self.state = WorkflowState.ANALYZING
-            logger.info("Analyzing task with LLM...")
-            task_record = await self.task_analyzer.analyze(task_message.raw_text)
-            task_record.task_id = self.current_task.task_id
-            task_record.user_id = self.current_task.user_id
-            task_record.user_name = self.current_task.user_name
+            logger.info("Task analyzed")
             await self._trigger_event("on_task_analyzed", task_record)
             
-            # Step 3: Request user confirmation
             self.state = WorkflowState.AWAITING_CONFIRMATION
-            confirmation = await self.decision_manager.request_confirmation(task_record)
+            confirmation = await self.decision_manager.wait_confirmation(task_record.task_id, task_record, auto_confirm=self.dry_run)
             
-            if confirmation == ConfirmationResult.CANCELLED:
-                task_record.status = TaskStatus.CANCELLED
+            if confirmation == Decision.REJECTED:
+                task_record.status = TaskStatus.FAILED
                 await self._trigger_event("on_task_cancelled", task_record)
                 self.state = WorkflowState.CANCELLED
                 return task_record
             
-            if confirmation == ConfirmationResult.TIMEOUT:
-                task_record.status = TaskStatus.TIMEOUT
+            if confirmation == Decision.TIMEOUT:
+                task_record.status = TaskStatus.FAILED
                 await self._trigger_event("on_task_timeout", task_record)
                 self.state = WorkflowState.FAILED
                 return task_record
@@ -136,12 +136,11 @@ class WorkflowOrchestrator:
             task_record.status = TaskStatus.APPROVED
             await self._trigger_event("on_task_confirmed", task_record)
             
-            # Step 4: Execute code generation
             self.state = WorkflowState.EXECUTING
             task_record.status = TaskStatus.EXECUTING
             logger.info("Executing code generation...")
             
-            instruction = await self.task_analyzer.generate_instruction(task_record)
+            instruction = f"创建代码: {task_record.summary}"
             result = await self.code_executor.execute(instruction, dry_run=self.dry_run)
             
             task_record.executor_result = result.stdout if result.success else result.stderr
@@ -150,13 +149,12 @@ class WorkflowOrchestrator:
             
             await self._trigger_event("on_task_executed", task_record, result)
             
-            # Step 5: Record to Feishu
             self.state = WorkflowState.RECORDING
             task_record.status = TaskStatus.COMPLETED if result.success else TaskStatus.FAILED
             task_record.completed_at = datetime.now()
             
             if not self.dry_run:
-                await self.feishu_client.create_record(task_record)
+                self.feishu_client.create_record(task_record)
             
             await self._trigger_event("on_task_completed", task_record)
             

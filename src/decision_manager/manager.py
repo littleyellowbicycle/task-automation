@@ -88,13 +88,19 @@ class DecisionManager:
             logger.error(f"Error sending confirmation: {e}")
             return False
 
-    async def wait_confirmation(self, task_id: str, record: TaskRecord) -> Decision:
+    async def wait_confirmation(self, task_id: str, record: TaskRecord, auto_confirm: bool = False) -> Decision:
         pending = PendingConfirmation(
             task_id=task_id,
             record=record,
             created_at=time.time(),
         )
         self._pending[task_id] = pending
+
+        if auto_confirm:
+            self._pending[task_id].confirmed = True
+            self._pending[task_id].decision = Decision.APPROVED
+            logger.info(f"Auto-confirmed task {task_id}")
+            return Decision.APPROVED
 
         self.send_confirmation(record)
 

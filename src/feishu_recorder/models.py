@@ -20,7 +20,12 @@ class TaskRecord:
     summary: str
     tech_stack: List[str]
     core_features: List[str]
-    status: TaskStatus  # e.g., PENDING, APPROVED, EXECUTING, COMPLETED, FAILED
+    status: TaskStatus
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    executor_result: Optional[str] = None
+    error_message: Optional[str] = None
+    completed_at: Optional[datetime] = None
     code_repo_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

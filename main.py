@@ -71,7 +71,7 @@ async def test_workflow(orchestrator: WorkflowOrchestrator):
     
     # Run workflow
     result = await orchestrator.run(task_message)
-    print(f"\n✅ Workflow completed!")
+    print(f"\n=== Workflow completed! ===")
     print(f"Task ID: {result.task_id}")
     print(f"Summary: {result.summary}")
     print(f"Status: {result.status.value}")
@@ -92,8 +92,8 @@ async def main_async(args):
     
     # Setup logging
     setup_logger(
-        log_dir=config.logging.dir,
-        log_level=args.log_level or config.logging.level,
+        log_dir=config.logging_dir,
+        log_level=args.log_level or config.logging_level,
     )
     logger = get_logger("main")
     
@@ -116,7 +116,7 @@ async def main_async(args):
     
     # Normal mode: Start listening for WeChat messages
     logger.info("Starting WeChat listener...")
-    
+
     # Create WeChat listener
     listener = WeChatListener(
         device_id=config.wechat.device_id,
@@ -125,10 +125,10 @@ async def main_async(args):
         keywords=config.task_filters.keywords,
         regex_patterns=config.task_filters.regex_patterns,
     )
-    
+
     # Set up callback
     from src.wechat_listener.models import TaskMessage
-    
+
     async def on_task_message(task_msg: TaskMessage):
         logger.info(f"Task message received: {task_msg.original_message.content[:50]}...")
         try:
@@ -136,16 +136,23 @@ async def main_async(args):
             logger.info(f"Task completed: {result.task_id} - {result.status.value}")
         except Exception as e:
             logger.error(f"Workflow error: {e}")
-    
+
     from src.wechat_listener.listener import MessageCallback
     listener.set_callback(MessageCallback(on_task_message=on_task_message))
-    
+
     # Start listening
     try:
         await listener.start_listening()
     except KeyboardInterrupt:
         logger.info("Shutting down...")
         listener.disconnect()
+    except Exception as e:
+        logger.error(f"Failed to start WeChat listener: {e}")
+        logger.error("Make sure:")
+        logger.error("  1. Python 3.10 is installed (ntwork requirement)")
+        logger.error("  2. WeCom 4.0.8.6027 is installed and logged in")
+        logger.error("  3. ntwork is installed: pip install ntwork")
+        sys.exit(1)
 
 
 def main():

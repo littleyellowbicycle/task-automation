@@ -1,7 +1,8 @@
 wechat:
-  device_id: "dev-12345"
+  device_id: ""
   ip: "127.0.0.1"
   port: 5037
+  smart_mode: true
 llm:
   ollama_base_url: "http://localhost:11434"
   anthropic_api_key: ""

@@ -1,3 +1,5 @@
-from .manager import DecisionManager
+from .manager import DecisionManager, Decision
 
-__all__ = ["DecisionManager"]
+ConfirmationResult = Decision
+
+__all__ = ["DecisionManager", "ConfirmationResult"]
