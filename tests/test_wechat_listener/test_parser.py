@@ -2,14 +2,14 @@
 
 import pytest
 from src.wechat_listener.parser import MessageParser
-from src.wechat_listener.models import MessageType
+from src.wechat_listener.models import WeChatMessage, MessageType, ConversationType
 
 
 class TestMessageParser:
     def test_parse_text_message(self):
         parser = MessageParser()
         raw = {
-            "msgid": "123",
+            "msg_id": "123",
             "msgtype": "text",
             "content": "Hello World",
             "conversation_id": "R:group_001",
@@ -23,7 +23,6 @@ class TestMessageParser:
 
     def test_is_task_message_with_keyword(self):
         parser = MessageParser()
-        from src.wechat_listener.models import WeChatMessage, MessageType, ConversationType
         
         msg = WeChatMessage(
             msg_id="123",
@@ -35,13 +34,12 @@ class TestMessageParser:
             sender_name="Test",
         )
         
-        is_task, matched = parser.is_task_message(msg)
-        assert is_task is True
-        assert len(matched) > 0
+        task = parser.parse_task_message(msg)
+        assert task.is_project_task is True
+        assert len(task.keywords_matched) > 0
 
     def test_is_task_message_without_keyword(self):
         parser = MessageParser()
-        from src.wechat_listener.models import WeChatMessage, MessageType, ConversationType
         
         msg = WeChatMessage(
             msg_id="123",
@@ -53,8 +51,8 @@ class TestMessageParser:
             sender_name="Test",
         )
         
-        is_task, matched = parser.is_task_message(msg)
-        assert is_task is False
+        task = parser.parse_task_message(msg)
+        assert task.is_project_task is False
 
     def test_parse_task_message(self, sample_wechat_message):
         parser = MessageParser()

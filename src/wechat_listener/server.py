@@ -1,20 +1,24 @@
+"""Legacy webhook server module (kept for backward compatibility)."""
+
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
-import logging
-import json
-import hmac
-import hashlib
-from collections import deque
 import asyncio
+import hashlib
+import hmac
+import json
+import logging
 import os
-import os
-from typing import Any, Dict
+from collections import deque
 from queue import Queue
+from typing import Any, Dict
+
+from fastapi import FastAPI, Request
+
+from .models import TaskMessage, WeChatMessage
+from .parser import MessageParser
 
 app = FastAPI(title="WeChat Webhook Receiver")
 
-# Lightweight in-process queue for task messages emitted by webhook
 _message_queue: Queue = Queue()
 WECHAT_HOOK_TOKEN = os.environ.get("WECHAT_HOOK_TOKEN", "")
 _dedup_ids: deque = deque()
@@ -51,15 +55,11 @@ async def _is_duplicate(msg_id: str) -> bool:
             old = _dedup_ids.popleft()
             _dedup_set.discard(old)
         return False
-from .parser import MessageParser
-from .models import WeChatMessage, TaskMessage
 
 
 def _extract_message(payload: Dict[str, Any]) -> Dict[str, Any]:
-    # Very lightweight extractor; real implementation should decrypt, verify, and parse XML/JSON payloads
     if not payload:
         return {"type": "unknown", "content": ""}
-    # Common fields in webhook payloads
     if "Encrypt" in payload:
         return {"type": "text", "content": "encrypted"}
     if "content" in payload:
@@ -80,20 +80,16 @@ async def wechat_webhook(request: Request) -> Dict[str, Any]:
         payload = json.loads(body.decode("utf-8"))
     except Exception:
         payload = {}
-    # Verify signature
     sig = request.headers.get("X-WeChat-Signature", "")
     if not _verify_signature_v1(sig, body):
         return {"ok": False, "error": "invalid signature"}
 
-    # Deduplication check
     msg_id = str(payload.get("msg_id") or payload.get("id") or hash(payload))
     if await _is_duplicate(msg_id):
         return {"ok": True, "status": "duplicate", "task_id": msg_id}
 
-    # Lightweight parsing using the in-module parser
     parser = MessageParser()
     wechat_message: WeChatMessage = parser.parse(payload)
-    # Build a task message if applicable
     task_msg: TaskMessage = parser.parse_task_message(wechat_message)
     if task_msg.is_project_task:
         _message_queue.put(task_msg)

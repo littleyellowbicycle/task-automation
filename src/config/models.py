@@ -1,16 +1,41 @@
 """Configuration models for WeChat Task Automation System."""
 
-from typing import List
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-class WeChatConfig(BaseModel):
+class NtWorkListenerConfig(BaseModel):
     device_id: str = ""
     ip: str = "127.0.0.1"
     port: int = 5037
+    smart_mode: bool = True
+
+
+class WebhookListenerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    token: str = ""
+    path: str = "/webhook/wechat"
+
+
+class UIAutomationListenerConfig(BaseModel):
+    poll_interval: float = 0.5
+    max_history: int = 100
+
+
+class WeChatConfig(BaseModel):
+    listener_type: Literal["ntwork", "webhook", "uiautomation"] = "uiautomation"
+    platform: Literal["wework", "wechat"] = "wework"
+    device_id: str = ""
+    ip: str = "127.0.0.1"
+    port: int = 5037
+    smart_mode: bool = True
     auto_reconnect: bool = True
     reconnect_interval: int = 5
     message_queue_size: int = 100
+    ntwork: NtWorkListenerConfig = Field(default_factory=NtWorkListenerConfig)
+    webhook: WebhookListenerConfig = Field(default_factory=WebhookListenerConfig)
+    uiautomation: UIAutomationListenerConfig = Field(default_factory=UIAutomationListenerConfig)
 
 
 class OllamaConfig(BaseModel):

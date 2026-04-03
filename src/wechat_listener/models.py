@@ -21,8 +21,14 @@ class MessageType(str, Enum):
 
 class ConversationType(str, Enum):
     """Conversation types."""
-    PRIVATE = "private"  # Private chat
-    GROUP = "group"  # Group chat
+    PRIVATE = "private"
+    GROUP = "group"
+
+
+class Platform(str, Enum):
+    """Supported chat platforms."""
+    WEWORK = "wework"
+    WECHAT = "wechat"
 
 
 @dataclass
@@ -35,6 +41,7 @@ class WeChatMessage:
     conversation_type: ConversationType
     sender_id: str
     sender_name: str
+    platform: Platform = Platform.WEWORK
     timestamp: datetime = field(default_factory=datetime.now)
     raw_data: Optional[Dict[str, Any]] = None
     

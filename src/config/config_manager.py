@@ -28,6 +28,7 @@ class ConfigManager:
         self._config = data
         self.set_defaults()
         self._merge_env("WECHAT_DEVICE_ID", path=["wechat"], key="device_id")
+        self._merge_env("WECHAT_HOOK_TOKEN", path=["wechat", "webhook"], key="token")
         self._merge_env("OLLAMA_BASE_URL", path=["llm"], key="ollama_base_url")
         self._merge_env("ANTHROPIC_API_KEY", path=["llm"], key="anthropic_api_key")
         self._merge_env("OPENAI_API_KEY", path=["llm"], key="openai_api_key")
@@ -44,7 +45,33 @@ class ConfigManager:
 
     def set_defaults(self) -> None:
         defaults = {
-            "wechat": {"device_id": "", "ip": "127.0.0.1", "port": 5037},
+            "wechat": {
+                "listener_type": "uiautomation",
+                "platform": "wework",
+                "device_id": "",
+                "ip": "127.0.0.1",
+                "port": 5037,
+                "smart_mode": True,
+                "auto_reconnect": True,
+                "reconnect_interval": 5,
+                "message_queue_size": 100,
+                "ntwork": {
+                    "device_id": "",
+                    "ip": "127.0.0.1",
+                    "port": 5037,
+                    "smart_mode": True,
+                },
+                "webhook": {
+                    "host": "0.0.0.0",
+                    "port": 8080,
+                    "token": "",
+                    "path": "/webhook/wechat",
+                },
+                "uiautomation": {
+                    "poll_interval": 0.5,
+                    "max_history": 100,
+                },
+            },
             "llm": {"ollama_base_url": "", "anthropic_api_key": "", "openai_api_key": ""},
             "opencode": {},
             "feishu": {"app_id": "", "app_secret": "", "table_id": ""},
@@ -76,11 +103,36 @@ class ConfigManager:
     @property
     def wechat(self) -> SimpleNamespace:
         w = self._config.get("wechat", {})
+        ntwork_config = w.get("ntwork", {})
+        webhook_config = w.get("webhook", {})
+        uiautomation_config = w.get("uiautomation", {})
+        
         return SimpleNamespace(
+            listener_type=w.get("listener_type", "uiautomation"),
+            platform=w.get("platform", "wework"),
             device_id=w.get("device_id", ""),
             ip=w.get("ip", "127.0.0.1"),
             port=w.get("port", 5037),
             smart_mode=w.get("smart_mode", True),
+            auto_reconnect=w.get("auto_reconnect", True),
+            reconnect_interval=w.get("reconnect_interval", 5),
+            message_queue_size=w.get("message_queue_size", 100),
+            ntwork=SimpleNamespace(
+                device_id=ntwork_config.get("device_id", ""),
+                ip=ntwork_config.get("ip", "127.0.0.1"),
+                port=ntwork_config.get("port", 5037),
+                smart_mode=ntwork_config.get("smart_mode", True),
+            ),
+            webhook=SimpleNamespace(
+                host=webhook_config.get("host", "0.0.0.0"),
+                port=webhook_config.get("port", 8080),
+                token=webhook_config.get("token", ""),
+                path=webhook_config.get("path", "/webhook/wechat"),
+            ),
+            uiautomation=SimpleNamespace(
+                poll_interval=uiautomation_config.get("poll_interval", 0.5),
+                max_history=uiautomation_config.get("max_history", 100),
+            ),
         )
 
     @property

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .models import WeChatMessage, MessageType, ConversationType, TaskMessage
 
@@ -29,7 +29,7 @@ class MessageParser:
             conversation_type=conv_type,
             sender_id=sender_id,
             sender_name=payload.get("sender_name", "unknown"),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             raw_data=payload,
         )
         return wm

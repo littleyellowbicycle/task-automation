@@ -13,3 +13,4 @@ loguru>=0.7.2
 httpx>=0.26.0
 pytest>=7.0
 ruff>=0.5
+uiautomation>=2.0.0
