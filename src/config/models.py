@@ -66,10 +66,17 @@ class LLMConfig(BaseModel):
 
 
 class OpenCodeConfig(BaseModel):
+    mode: Literal["local", "remote"] = "remote"
     host: str = "localhost"
     port: int = 18792
-    work_dir: str = "/tmp/opencode_workspace"
-    timeout: int = 600
+    work_dir: str = "./workspace"
+    timeout: int = 3600
+    interaction_timeout: int = 1800
+    max_retries: int = 3
+    retry_delay: int = 60
+    cli_path: str = "opencode"
+    api_url: str = ""
+    api_key: str = ""
     allowed_commands: List[str] = ["create", "modify", "read"]
     forbidden_paths: List[str] = ["/etc", "/root", "/sys", "/proc"]
 
@@ -78,7 +85,50 @@ class FeishuConfig(BaseModel):
     app_id: str = ""
     app_secret: str = ""
     table_id: str = ""
+    webhook_url: str = ""
     token_refresh_buffer: int = 300
+
+
+class GatewayConfig(BaseModel):
+    dedup_enabled: bool = True
+    dedup_max_cache: int = 1000
+    dedup_ttl: int = 3600
+
+
+class FilterConfig(BaseModel):
+    model_name: str = "Qwen/Qwen3-0.6B"
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    task_threshold: float = 0.5
+    dedup_threshold: float = 0.85
+    max_history: int = 100
+    cache_embeddings: bool = True
+    timeout: float = 30.0
+
+
+class QueueConfig(BaseModel):
+    max_size: int = 20
+    confirmation_timeout: int = 10800
+    processing_timeout: int = 3600
+    retry_delay: int = 60
+    cleanup_interval: int = 300
+    enable_priority: bool = False
+
+
+class DecisionConfig(BaseModel):
+    timeout: int = 10800
+    poll_interval: int = 5
+    reminder_interval: int = 1800
+    max_reminders: int = 3
+
+
+class MonitoringConfig(BaseModel):
+    enabled: bool = True
+    prometheus_port: int = 9090
+    metrics_retention: int = 3600
+    log_retention_days: int = 30
+    alert_webhook: str = ""
+    queue_threshold: int = 15
+    failure_threshold: int = 3
 
 
 class TaskFiltersConfig(BaseModel):
@@ -87,10 +137,11 @@ class TaskFiltersConfig(BaseModel):
 
 
 class WorkflowConfig(BaseModel):
-    confirm_timeout: int = 300
-    max_concurrent_tasks: int = 3
+    max_queue_size: int = 20
+    confirmation_timeout: int = 10800
+    max_concurrent_tasks: int = 1
     retry_attempts: int = 3
-    retry_delay: int = 5
+    retry_delay: int = 60
 
 
 class LoggingRotationConfig(BaseModel):
@@ -116,6 +167,11 @@ class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     opencode: OpenCodeConfig = Field(default_factory=OpenCodeConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    filter: FilterConfig = Field(default_factory=FilterConfig)
+    queue: QueueConfig = Field(default_factory=QueueConfig)
+    decision: DecisionConfig = Field(default_factory=DecisionConfig)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     task_filters: TaskFiltersConfig = Field(default_factory=TaskFiltersConfig)
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

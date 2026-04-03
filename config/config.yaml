@@ -5,6 +5,9 @@ wechat:
   ip: "127.0.0.1"
   port: 5037
   smart_mode: true
+  auto_reconnect: true
+  reconnect_interval: 5
+  message_queue_size: 100
   ntwork:
     device_id: ""
     ip: "127.0.0.1"
@@ -18,25 +21,122 @@ wechat:
   uiautomation:
     poll_interval: 0.5
     max_history: 100
+
 llm:
-  ollama_base_url: "http://localhost:11434"
-  anthropic_api_key: ""
-  openai_api_key: ""
-opencode: {}
+  default_provider: "ollama"
+  complexity_threshold: "medium"
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "llama3.2"
+    timeout: 120
+    stream: true
+  anthropic:
+    api_key: ""
+    model: "claude-sonnet-4-20250514"
+    max_tokens: 4096
+  openai:
+    api_key: ""
+    model: "gpt-4o"
+    max_tokens: 4096
+
+opencode:
+  mode: "remote"
+  host: "localhost"
+  port: 18792
+  work_dir: "./workspace"
+  timeout: 3600
+  interaction_timeout: 1800
+  max_retries: 3
+  retry_delay: 60
+  cli_path: "opencode"
+  api_url: ""
+  api_key: ""
+  allowed_commands:
+    - "create"
+    - "modify"
+    - "read"
+  forbidden_paths:
+    - "/etc"
+    - "/root"
+    - "/sys"
+    - "/proc"
+
 feishu:
   app_id: ""
   app_secret: ""
   table_id: ""
-workflow:
-  mode: "normal"
-  log_level: "INFO"
-logging:
-  dir: "logs"
-  level: "INFO"
-  format: "%(levelname)s:%(name)s:%(message)s"
+  webhook_url: ""
+  token_refresh_buffer: 300
+
+gateway:
+  dedup_enabled: true
+  dedup_max_cache: 1000
+  dedup_ttl: 3600
+
+filter:
+  model_name: "Qwen/Qwen3-0.6B"
+  device: "auto"
+  task_threshold: 0.5
+  dedup_threshold: 0.85
+  max_history: 100
+  cache_embeddings: true
+  timeout: 30.0
+
+queue:
+  max_size: 20
+  confirmation_timeout: 10800
+  processing_timeout: 3600
+  retry_delay: 60
+  cleanup_interval: 300
+  enable_priority: false
+
+decision:
+  timeout: 10800
+  poll_interval: 5
+  reminder_interval: 1800
+  max_reminders: 3
+
+monitoring:
+  enabled: true
+  prometheus_port: 9090
+  metrics_retention: 3600
+  log_retention_days: 30
+  alert_webhook: ""
+  queue_threshold: 15
+  failure_threshold: 3
+
 task_filters:
   keywords:
     - "项目发布"
     - "需求"
     - "开发任务"
-  regex_patterns: []
+    - "功能开发"
+    - "bug修复"
+    - "重构"
+  regex_patterns:
+    - "^项目发布[:：]"
+    - "^需求[:：]"
+    - "^开发[:：]"
+
+workflow:
+  max_queue_size: 20
+  confirmation_timeout: 10800
+  max_concurrent_tasks: 1
+  retry_attempts: 3
+  retry_delay: 60
+
+logging:
+  level: "INFO"
+  dir: "./logs"
+  rotation:
+    max_size: "100 MB"
+    retention: "7 days"
+  format: "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+
+health_check:
+  enabled: true
+  interval: 60
+  components:
+    - "wechat"
+    - "llm"
+    - "feishu"
