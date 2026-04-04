@@ -1,382 +1,328 @@
-"""Monitoring module for metrics, logging, and alerting."""
+"""Monitoring module for metrics collection and alerting."""
 
-import json
+import asyncio
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
-import threading
-
-import requests
+from typing import Dict, List, Optional, Callable
 
 from ..utils import get_logger
+from ..exceptions import WeChatAutomationError
 
 logger = get_logger("monitoring")
 
 
-@dataclass
-class MetricValue:
-    """A metric value with timestamp."""
-    value: float
-    timestamp: float = field(default_factory=time.time)
+class MonitoringError(WeChatAutomationError):
+    """Base exception for monitoring errors."""
+    pass
 
 
 @dataclass
-class AlertRule:
-    """An alert rule configuration."""
-    name: str
-    condition: Callable[[float], bool]
-    message: str
-    severity: str = "warning"  # info, warning, error, critical
-    cooldown: int = 300  # seconds between alerts
-    last_triggered: float = 0
-
-
-@dataclass
-class MonitoringConfig:
-    """Configuration for monitoring."""
+class MetricConfig:
+    """Configuration for metrics collection."""
     enabled: bool = True
     prometheus_port: int = 9090
-    metrics_retention: int = 3600  # 1 hour
-    alert_webhook: str = ""
+    metrics_retention: int = 3600  # seconds
     log_retention_days: int = 30
 
 
+@dataclass
+class AlertConfig:
+    """Configuration for alerting."""
+    enabled: bool = True
+    feishu_webhook: str = ""
+    queue_threshold: int = 15
+    failure_threshold: int = 3
+    llm_timeout_threshold: int = 30  # seconds
+    resource_threshold: float = 90.0  # percentage
+    service_failure_threshold: int = 3
+
+
 class MetricsCollector:
-    """
-    Metrics collector for Prometheus-style metrics.
+    """Metrics collector for the system."""
     
-    Supported metric types:
-    - Counter: Only increases
-    - Gauge: Can increase or decrease
-    - Histogram: Distribution of values
-    """
+    def __init__(self):
+        self._metrics: Dict[str, float] = {}
+        self._counters: Dict[str, int] = {}
+        self._histograms: Dict[str, List[float]] = {}
+        self._start_time = time.time()
     
-    def __init__(self, retention: int = 3600):
-        self._counters: Dict[str, float] = defaultdict(float)
-        self._gauges: Dict[str, float] = {}
-        self._histograms: Dict[str, List[MetricValue]] = defaultdict(list)
-        self._retention = retention
-        self._lock = threading.Lock()
+    def increment_counter(self, name: str, value: int = 1):
+        """Increment a counter metric."""
+        self._counters[name] = self._counters.get(name, 0) + value
     
-    def counter(self, name: str, value: float = 1.0, labels: Optional[Dict[str, str]] = None) -> None:
-        """Increment a counter."""
-        key = self._make_key(name, labels)
-        with self._lock:
-            self._counters[key] += value
+    def set_gauge(self, name: str, value: float):
+        """Set a gauge metric."""
+        self._metrics[name] = value
     
-    def gauge(self, name: str, value: float, labels: Optional[Dict[str, str]] = None) -> None:
-        """Set a gauge value."""
-        key = self._make_key(name, labels)
-        with self._lock:
-            self._gauges[key] = value
+    def record_histogram(self, name: str, value: float):
+        """Record a histogram metric."""
+        if name not in self._histograms:
+            self._histograms[name] = []
+        self._histograms[name].append(value)
     
-    def histogram(self, name: str, value: float, labels: Optional[Dict[str, str]] = None) -> None:
-        """Record a histogram value."""
-        key = self._make_key(name, labels)
-        with self._lock:
-            self._histograms[key].append(MetricValue(value=value))
-            self._cleanup_histogram(key)
-    
-    def _make_key(self, name: str, labels: Optional[Dict[str, str]] = None) -> str:
-        """Make a metric key with labels."""
-        if not labels:
-            return name
-        label_str = ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
-        return f"{name}{{{label_str}}}"
-    
-    def _cleanup_histogram(self, key: str) -> None:
-        """Clean up old histogram values."""
-        cutoff = time.time() - self._retention
-        self._histograms[key] = [
-            v for v in self._histograms[key]
-            if v.timestamp > cutoff
-        ]
-    
-    def get_counter(self, name: str, labels: Optional[Dict[str, str]] = None) -> float:
-        """Get counter value."""
-        key = self._make_key(name, labels)
-        return self._counters.get(key, 0)
-    
-    def get_gauge(self, name: str, labels: Optional[Dict[str, str]] = None) -> float:
-        """Get gauge value."""
-        key = self._make_key(name, labels)
-        return self._gauges.get(key, 0)
-    
-    def get_histogram_stats(
-        self,
-        name: str,
-        labels: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, float]:
-        """Get histogram statistics."""
-        key = self._make_key(name, labels)
-        values = [v.value for v in self._histograms.get(key, [])]
-        
-        if not values:
-            return {"count": 0, "sum": 0, "avg": 0, "min": 0, "max": 0, "p50": 0, "p95": 0, "p99": 0}
-        
-        values.sort()
-        count = len(values)
-        
+    def get_metrics(self) -> Dict[str, any]:
+        """Get all metrics."""
         return {
-            "count": count,
-            "sum": sum(values),
-            "avg": sum(values) / count,
-            "min": values[0],
-            "max": values[-1],
-            "p50": values[int(count * 0.5)] if count > 0 else 0,
-            "p95": values[int(count * 0.95)] if count > 0 else 0,
-            "p99": values[int(count * 0.99)] if count > 0 else 0,
+            "counters": self._counters,
+            "gauges": self._metrics,
+            "histograms": self._histograms,
+            "uptime_seconds": time.time() - self._start_time
         }
     
-    def export_prometheus(self) -> str:
-        """Export metrics in Prometheus format."""
-        lines = []
-        
-        with self._lock:
-            for key, value in self._counters.items():
-                lines.append(f"# TYPE {key.split('{')[0]} counter")
-                lines.append(f"{key} {value}")
-            
-            for key, value in self._gauges.items():
-                lines.append(f"# TYPE {key.split('{')[0]} gauge")
-                lines.append(f"{key} {value}")
-            
-            for key in self._histograms:
-                stats = self.get_histogram_stats(key.split('{')[0])
-                base_name = key.split('{')[0]
-                labels = '{' + key.split('{')[1] if '{' in key else ''
-                
-                lines.append(f"# TYPE {base_name} histogram")
-                lines.append(f"{base_name}_count{labels} {stats['count']}")
-                lines.append(f"{base_name}_sum{labels} {stats['sum']}")
-                lines.append(f"{base_name}_avg{labels} {stats['avg']}")
-        
-        return "\n".join(lines)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Export all metrics as dictionary."""
-        with self._lock:
-            return {
-                "counters": dict(self._counters),
-                "gauges": dict(self._gauges),
-                "histograms": {
-                    key: self.get_histogram_stats(key.split('{')[0])
-                    for key in self._histograms
-                },
-            }
+    def reset(self):
+        """Reset all metrics."""
+        self._metrics.clear()
+        self._counters.clear()
+        self._histograms.clear()
 
 
 class AlertManager:
-    """
-    Alert manager for sending alerts.
-    """
+    """Alert manager for the system."""
     
-    def __init__(self, webhook: str = ""):
-        self.webhook = webhook
-        self._rules: Dict[str, AlertRule] = {}
-        self._alert_count = 0
+    def __init__(self, config: AlertConfig):
+        self.config = config
+        self._alert_history: List[Dict[str, any]] = []
+        self._consecutive_failures = 0
+        self._consecutive_service_failures = 0
     
-    def add_rule(self, rule: AlertRule) -> None:
-        """Add an alert rule."""
-        self._rules[rule.name] = rule
-        logger.info(f"Added alert rule: {rule.name}")
-    
-    def remove_rule(self, name: str) -> None:
-        """Remove an alert rule."""
-        self._rules.pop(name, None)
-    
-    def check(self, metrics: MetricsCollector) -> List[Dict[str, Any]]:
-        """Check all rules and trigger alerts."""
+    async def check_alert_conditions(
+        self,
+        queue_size: int,
+        failure_count: int,
+        llm_inference_time: float,
+        resource_usage: float,
+        service_health: bool
+    ) -> List[str]:
+        """Check alert conditions and generate alerts."""
         alerts = []
         
-        for name, rule in self._rules.items():
-            gauge_value = metrics.get_gauge(name)
-            
-            if rule.condition(gauge_value):
-                now = time.time()
-                
-                if now - rule.last_triggered < rule.cooldown:
-                    continue
-                
-                rule.last_triggered = now
-                
-                alert = {
-                    "name": name,
-                    "value": gauge_value,
-                    "message": rule.message.format(value=gauge_value),
-                    "severity": rule.severity,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-                
-                alerts.append(alert)
-                self._send_alert(alert)
+        # Queue backlog alert
+        if queue_size > self.config.queue_threshold:
+            alerts.append(f"⚠️ 任务队列积压：当前队列大小 {queue_size}，阈值 {self.config.queue_threshold}")
+        
+        # Consecutive failures alert
+        if failure_count > 0:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self.config.failure_threshold:
+                alerts.append(f"🚨 连续任务失败：已连续 {self._consecutive_failures} 个任务失败")
+        else:
+            self._consecutive_failures = 0
+        
+        # LLM timeout alert
+        if llm_inference_time > self.config.llm_timeout_threshold:
+            alerts.append(f"⏰ LLM 响应超时：{llm_inference_time:.2f}秒，阈值 {self.config.llm_timeout_threshold}秒")
+        
+        # Resource usage alert
+        if resource_usage > self.config.resource_threshold:
+            alerts.append(f"💻 系统资源紧张：{resource_usage:.1f}%，阈值 {self.config.resource_threshold}%")
+        
+        # Service health alert
+        if not service_health:
+            self._consecutive_service_failures += 1
+            if self._consecutive_service_failures >= self.config.service_failure_threshold:
+                alerts.append(f"🔌 服务不可用：已连续 {self._consecutive_service_failures} 次连接失败")
+        else:
+            self._consecutive_service_failures = 0
+        
+        # Add alerts to history
+        for alert in alerts:
+            self._alert_history.append({
+                "message": alert,
+                "timestamp": time.time()
+            })
+        
+        # Keep only recent alerts
+        if len(self._alert_history) > 100:
+            self._alert_history = self._alert_history[-100:]
         
         return alerts
     
-    def _send_alert(self, alert: Dict[str, Any]) -> None:
-        """Send an alert notification."""
-        self._alert_count += 1
-        
-        if not self.webhook:
-            logger.warning(f"Alert (no webhook): {alert['message']}")
+    async def send_alert(self, message: str):
+        """Send an alert."""
+        if not self.config.feishu_webhook:
+            logger.warning("Feishu webhook not configured, cannot send alert")
             return
         
         try:
-            severity_emoji = {
-                "info": "ℹ️",
-                "warning": "⚠️",
-                "error": "🚨",
-                "critical": "🔥",
-            }.get(alert["severity"], "📢")
-            
+            import requests
             payload = {
                 "msg_type": "text",
                 "content": {
-                    "text": f"{severity_emoji} {alert['message']}\n\n"
-                            f"时间: {alert['timestamp']}\n"
-                            f"严重程度: {alert['severity']}"
-                },
+                    "text": message
+                }
             }
-            
             response = requests.post(
-                self.webhook,
+                self.config.feishu_webhook,
                 json=payload,
-                timeout=10,
+                timeout=10
             )
-            
-            if response.status_code == 200:
-                logger.info(f"Alert sent: {alert['name']}")
-            else:
-                logger.error(f"Failed to send alert: {response.status_code}")
-                
+            response.raise_for_status()
+            logger.info(f"Alert sent successfully: {message}")
         except Exception as e:
             logger.error(f"Failed to send alert: {e}")
     
-    @property
-    def stats(self) -> Dict[str, Any]:
-        """Get alert manager statistics."""
-        return {
-            "total_alerts": self._alert_count,
-            "rules_count": len(self._rules),
-        }
+    async def send_alerts(self, alerts: List[str]):
+        """Send multiple alerts."""
+        for alert in alerts:
+            await self.send_alert(alert)
 
 
 class MonitoringService:
-    """
-    Main monitoring service.
-    """
+    """Monitoring service for the system."""
     
-    def __init__(self, config: Optional[MonitoringConfig] = None):
-        self.config = config or MonitoringConfig()
-        self.metrics = MetricsCollector(retention=self.config.metrics_retention)
-        self.alerts = AlertManager(webhook=self.config.alert_webhook)
-        self._setup_default_rules()
+    def __init__(
+        self,
+        metric_config: Optional[MetricConfig] = None,
+        alert_config: Optional[AlertConfig] = None
+    ):
+        self.metric_config = metric_config or MetricConfig()
+        self.alert_config = alert_config or AlertConfig()
+        self.metrics = MetricsCollector()
+        self.alert_manager = AlertManager(self.alert_config)
         self._running = False
+        self._prometheus_server = None
     
-    def _setup_default_rules(self) -> None:
-        """Setup default alert rules."""
-        self.alerts.add_rule(AlertRule(
-            name="queue_size",
-            condition=lambda v: v > 15,
-            message="⚠️ 任务队列积压，当前 {value} 个任务等待处理",
-            severity="warning",
-        ))
+    async def start(self):
+        """Start the monitoring service."""
+        if not self.metric_config.enabled:
+            logger.info("Monitoring service is disabled")
+            return
         
-        self.alerts.add_rule(AlertRule(
-            name="consecutive_failures",
-            condition=lambda v: v >= 3,
-            message="🚨 连续任务失败，请检查系统状态",
-            severity="error",
-        ))
+        self._running = True
+        logger.info("Starting monitoring service")
         
-        self.alerts.add_rule(AlertRule(
-            name="llm_latency_seconds",
-            condition=lambda v: v > 30,
-            message="⏰ LLM 响应超时，当前延迟 {value:.1f}s",
-            severity="warning",
-        ))
+        # Start Prometheus server if enabled
+        if self.metric_config.prometheus_port > 0:
+            await self._start_prometheus_server()
         
-        self.alerts.add_rule(AlertRule(
-            name="memory_usage_percent",
-            condition=lambda v: v > 90,
-            message="💻 系统资源紧张，内存使用 {value:.1f}%",
-            severity="warning",
-        ))
+        # Start health check task
+        asyncio.create_task(self._health_check_task())
+    
+    async def stop(self):
+        """Stop the monitoring service."""
+        self._running = False
+        logger.info("Stopping monitoring service")
         
-        self.alerts.add_rule(AlertRule(
-            name="cpu_usage_percent",
-            condition=lambda v: v > 90,
-            message="💻 系统资源紧张，CPU 使用 {value:.1f}%",
-            severity="warning",
-        ))
+        if self._prometheus_server:
+            try:
+                self._prometheus_server.close()
+                await self._prometheus_server.wait_closed()
+            except Exception as e:
+                logger.error(f"Error stopping Prometheus server: {e}")
     
-    def record_task_received(self) -> None:
-        """Record a received task."""
-        self.metrics.counter("tasks_received_total")
+    async def _start_prometheus_server(self):
+        """Start Prometheus server."""
+        try:
+            from prometheus_client import start_http_server
+            start_http_server(self.metric_config.prometheus_port)
+            logger.info(f"Prometheus server started on port {self.metric_config.prometheus_port}")
+        except ImportError:
+            logger.warning("prometheus_client not installed, Prometheus metrics disabled")
+        except Exception as e:
+            logger.error(f"Failed to start Prometheus server: {e}")
     
-    def record_task_completed(self, duration: float) -> None:
-        """Record a completed task."""
-        self.metrics.counter("tasks_completed_total")
-        self.metrics.histogram("task_duration_seconds", duration)
+    async def _health_check_task(self):
+        """Health check task."""
+        while self._running:
+            try:
+                # Check system health
+                await self._check_system_health()
+            except Exception as e:
+                logger.error(f"Health check failed: {e}")
+            finally:
+                await asyncio.sleep(60)  # Check every minute
     
-    def record_task_failed(self) -> None:
-        """Record a failed task."""
-        self.metrics.counter("tasks_failed_total")
-    
-    def update_queue_size(self, size: int) -> None:
-        """Update queue size gauge."""
-        self.metrics.gauge("queue_size", size)
-    
-    def record_llm_inference(self, duration: float) -> None:
-        """Record LLM inference duration."""
-        self.metrics.histogram("llm_inference_duration_seconds", duration)
-        self.metrics.gauge("llm_latency_seconds", duration)
-    
-    def record_executor_run(self, duration: float) -> None:
-        """Record executor run duration."""
-        self.metrics.histogram("opencode_execution_duration_seconds", duration)
-    
-    def update_system_metrics(self) -> None:
-        """Update system resource metrics."""
+    async def _check_system_health(self):
+        """Check system health."""
+        # Get queue size from workflow orchestrator
+        queue_size = 0
+        
+        # Get failure count
+        failure_count = self.metrics._counters.get("tasks_failed_total", 0)
+        
+        # Get LLM inference time
+        llm_inference_time = self.metrics._metrics.get("llm_inference_duration", 0)
+        
+        # Get resource usage (mock for now)
+        resource_usage = 0.0
         try:
             import psutil
-            
-            self.metrics.gauge("memory_usage_percent", psutil.virtual_memory().percent)
-            self.metrics.gauge("cpu_usage_percent", psutil.cpu_percent(interval=1))
-            
+            resource_usage = psutil.cpu_percent()
         except ImportError:
             pass
+        
+        # Check service health (mock for now)
+        service_health = True
+        
+        # Check alerts
+        alerts = await self.alert_manager.check_alert_conditions(
+            queue_size,
+            failure_count,
+            llm_inference_time,
+            resource_usage,
+            service_health
+        )
+        
+        # Send alerts
+        if alerts:
+            await self.alert_manager.send_alerts(alerts)
     
-    def check_alerts(self) -> List[Dict[str, Any]]:
-        """Check and trigger alerts."""
-        self.update_system_metrics()
-        return self.alerts.check(self.metrics)
+    def record_task_received(self):
+        """Record a task received."""
+        self.metrics.increment_counter("tasks_received_total")
     
-    def get_metrics(self) -> Dict[str, Any]:
+    def record_task_completed(self):
+        """Record a task completed."""
+        self.metrics.increment_counter("tasks_completed_total")
+    
+    def record_task_failed(self):
+        """Record a task failed."""
+        self.metrics.increment_counter("tasks_failed_total")
+    
+    def record_task_duration(self, seconds: float):
+        """Record task duration."""
+        self.metrics.record_histogram("task_duration_seconds", seconds)
+    
+    def record_queue_size(self, size: int):
+        """Record queue size."""
+        self.metrics.set_gauge("queue_size", size)
+    
+    def record_llm_inference(self, seconds: float):
+        """Record LLM inference time."""
+        self.metrics.set_gauge("llm_inference_duration", seconds)
+        self.metrics.record_histogram("llm_inference_duration_seconds", seconds)
+    
+    def record_opencode_execution(self, seconds: float):
+        """Record OpenCode execution time."""
+        self.metrics.set_gauge("opencode_execution_duration", seconds)
+        self.metrics.record_histogram("opencode_execution_duration_seconds", seconds)
+    
+    def get_metrics(self) -> Dict[str, any]:
         """Get all metrics."""
-        return self.metrics.to_dict()
+        return self.metrics.get_metrics()
     
-    def get_prometheus_export(self) -> str:
-        """Get Prometheus export."""
-        return self.metrics.export_prometheus()
-    
-    @property
-    def stats(self) -> Dict[str, Any]:
-        """Get monitoring statistics."""
-        return {
-            "metrics": self.get_metrics(),
-            "alerts": self.alerts.stats,
-        }
+    def get_alert_history(self) -> List[Dict[str, any]]:
+        """Get alert history."""
+        return self.alert_manager._alert_history
 
 
-monitoring_service: Optional[MonitoringService] = None
+# Global monitoring service instance
+_monitoring_service: Optional[MonitoringService] = None
 
 
-def get_monitoring() -> MonitoringService:
-    """Get the global monitoring service."""
-    global monitoring_service
-    if monitoring_service is None:
-        monitoring_service = MonitoringService()
-    return monitoring_service
+def get_monitoring_service() -> MonitoringService:
+    """Get the global monitoring service instance."""
+    global _monitoring_service
+    if _monitoring_service is None:
+        _monitoring_service = MonitoringService()
+    return _monitoring_service
+
+
+def initialize_monitoring(
+    metric_config: Optional[MetricConfig] = None,
+    alert_config: Optional[AlertConfig] = None
+) -> MonitoringService:
+    """Initialize the monitoring service."""
+    global _monitoring_service
+    _monitoring_service = MonitoringService(metric_config, alert_config)
+    return _monitoring_service

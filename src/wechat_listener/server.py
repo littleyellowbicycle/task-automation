@@ -84,7 +84,7 @@ async def wechat_webhook(request: Request) -> Dict[str, Any]:
     if not _verify_signature_v1(sig, body):
         return {"ok": False, "error": "invalid signature"}
 
-    msg_id = str(payload.get("msg_id") or payload.get("id") or hash(payload))
+    msg_id = str(payload.get("msg_id") or payload.get("id") or hashlib.md5(json.dumps(payload, sort_keys=True).encode()).hexdigest())
     if await _is_duplicate(msg_id):
         return {"ok": True, "status": "duplicate", "task_id": msg_id}
 

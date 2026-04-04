@@ -18,10 +18,12 @@ class FeishuClient:
         app_secret: Optional[str] = None,
         table_id: Optional[str] = None,
         base_url: Optional[str] = None,
+        webhook_url: Optional[str] = None,
     ):
         self.app_id = app_id or os.getenv("FEISHU_APP_ID")
         self.app_secret = app_secret or os.getenv("FEISHU_APP_SECRET")
         self.table_id = table_id or os.getenv("FEISHU_TABLE_ID")
+        self.webhook_url = webhook_url or os.getenv("FEISHU_WEBHOOK_URL")
         self.base_url = base_url or "https://open.feishu.cn/open-apis"
         self._tenant_access_token: Optional[str] = None
         self._token_expires_at: float = 0
@@ -150,3 +152,195 @@ class FeishuClient:
         except Exception as e:
             logger.error(f"Feishu update record error: {e}")
             return False
+
+    def send_card(self, card_data: Dict[str, Any]) -> bool:
+        """Send a Feishu card message."""
+        token = self._get_tenant_access_token()
+        if not token:
+            logger.warning("No token, skipping Feishu card sending")
+            return False
+
+        url = f"{self.base_url}/im/v1/messages"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+        try:
+            resp = requests.post(url, json=card_data, headers=headers, timeout=10)
+            data = resp.json()
+            if data.get("code") == 0:
+                logger.info("Feishu card sent successfully")
+                return True
+            else:
+                logger.error(f"Failed to send card: {data}")
+                return False
+        except Exception as e:
+            logger.error(f"Feishu card send error: {e}")
+            return False
+
+    def send_webhook_card(self, card_data: Dict[str, Any]) -> bool:
+        """Send a Feishu card via webhook."""
+        if not self.webhook_url:
+            logger.warning("No webhook URL, skipping Feishu webhook card sending")
+            return False
+
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+        try:
+            resp = requests.post(self.webhook_url, json=card_data, headers=headers, timeout=10)
+            data = resp.json()
+            if data.get("code") == 0:
+                logger.info("Feishu webhook card sent successfully")
+                return True
+            else:
+                logger.error(f"Failed to send webhook card: {data}")
+                return False
+        except Exception as e:
+            logger.error(f"Feishu webhook card send error: {e}")
+            return False
+
+    def create_task_card(self, task_record: TaskRecord, callback_url: Optional[str] = None) -> Dict[str, Any]:
+        """Create a task approval card."""
+        card = {
+            "config": {
+                "wide_screen_mode": True,
+                "enable_forward": True
+            },
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"任务审批: {task_record.task_id}"
+                },
+                "template": "blue"
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": f"**任务摘要**: {task_record.summary}"
+                },
+                {
+                    "tag": "markdown",
+                    "content": f"**原始消息**: {task_record.raw_message[:100]}..."
+                },
+                {
+                    "tag": "markdown",
+                    "content": f"**技术栈**: {', '.join(task_record.tech_stack) if task_record.tech_stack else '未知'}"
+                },
+                {
+                    "tag": "markdown",
+                    "content": f"**核心功能**: {', '.join(task_record.core_features) if task_record.core_features else '未知'}"
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": f"**状态**: {task_record.status.value}"
+                    }
+                }
+            ],
+            "actions": [
+                {
+                    "tag": "button",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": "批准"
+                    },
+                    "type": "primary",
+                    "value": {
+                        "task_id": task_record.task_id,
+                        "action": "approve"
+                    }
+                },
+                {
+                    "tag": "button",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": "拒绝"
+                    },
+                    "type": "danger",
+                    "value": {
+                        "task_id": task_record.task_id,
+                        "action": "reject"
+                    }
+                }
+            ]
+        }
+
+        if callback_url:
+            card["callback_url"] = callback_url
+
+        return card
+
+    def create_notification_card(self, task_record: TaskRecord, message: str) -> Dict[str, Any]:
+        """Create a notification card."""
+        card = {
+            "config": {
+                "wide_screen_mode": True,
+                "enable_forward": True
+            },
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"任务通知: {task_record.task_id}"
+                },
+                "template": "green" if task_record.status == TaskStatus.COMPLETED else "orange"
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": f"**消息**: {message}"
+                },
+                {
+                    "tag": "markdown",
+                    "content": f"**任务摘要**: {task_record.summary}"
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": f"**状态**: {task_record.status.value}"
+                    }
+                }
+            ]
+        }
+
+        if task_record.code_repo_url:
+            card["elements"].append({
+                "tag": "a",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "查看代码仓库"
+                },
+                "href": task_record.code_repo_url
+            })
+
+        return card
+
+    def handle_callback(self, callback_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle Feishu card callback."""
+        try:
+            action = callback_data.get("action", {})
+            value = action.get("value", {})
+            task_id = value.get("task_id")
+            action_type = value.get("action")
+
+            if not task_id or not action_type:
+                return {"code": 400, "message": "Invalid callback data"}
+
+            logger.info(f"Received callback for task {task_id}: {action_type}")
+
+            # Return success response
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": task_id,
+                    "action": action_type
+                },
+                "message": "Callback processed"
+            }
+        except Exception as e:
+            logger.error(f"Error handling callback: {e}")
+            return {"code": 500, "message": "Internal error"}
