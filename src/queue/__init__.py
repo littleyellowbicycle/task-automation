@@ -384,6 +384,44 @@ class TaskQueue:
         
         return True
     
+    def requeue_task(self, task_id: str, reason: str = "deferred") -> bool:
+        """
+        Put a task back to the end of queue for later processing.
+        
+        This is called when user clicks "稍后" (later) button.
+        
+        Args:
+            task_id: Task identifier
+            reason: Reason for requeueing
+            
+        Returns:
+            True if requeued, False if not found or queue full
+        """
+        with self._lock:
+            task = self._task_index.get(task_id)
+            if not task:
+                logger.warning(f"Task {task_id} not found for requeue")
+                return False
+            
+            if len(self._queue) >= self.config.max_size:
+                logger.warning(f"Cannot requeue task {task_id}: queue is full")
+                return False
+            
+            if self._current_task and self._current_task.task_id == task_id:
+                self._current_task = None
+            
+            task.update_status(TaskStatus.QUEUED)
+            task.metadata["requeue_count"] = task.metadata.get("requeue_count", 0) + 1
+            task.metadata["last_requeue_reason"] = reason
+            
+            self._queue.append(task)
+            
+            logger.info(f"Task {task_id} requeued (reason: {reason}, requeue_count: {task.metadata['requeue_count']})")
+            
+            self._condition.notify()
+        
+        return True
+    
     def get_task(self, task_id: str) -> Optional[QueuedTask]:
         """Get a task by ID."""
         with self._lock:

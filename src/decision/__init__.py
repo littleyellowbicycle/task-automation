@@ -1,8 +1,9 @@
-"""Decision Manager module for user confirmation via Feishu cards."""
+"""Decision Manager module for user confirmation via Feishu private messages."""
 
 import asyncio
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -58,7 +59,6 @@ class PendingConfirmation:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     decision: Optional[Decision] = None
     message_id: Optional[str] = None
-    card_message_id: Optional[str] = None
     reminder_sent: bool = False
 
 
@@ -69,9 +69,10 @@ class DecisionConfig:
     poll_interval: int = 5  # seconds
     reminder_interval: int = 1800  # 30 minutes
     max_reminders: int = 3
-    feishu_webhook: str = ""
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
+    feishu_user_id: str = ""  # 接收消息的用户 ID
+    base_url: str = "https://open.feishu.cn/open-apis"
 
 
 class FeishuCardBuilder:
@@ -89,6 +90,47 @@ class FeishuCardBuilder:
         timeout_minutes: int,
     ) -> Dict[str, Any]:
         """Build a task confirmation card."""
+        
+        tech_str = ", ".join(tech_stack) if tech_stack else "未识别"
+        features_str = "\n".join([f"• {f}" for f in features]) if features else "• 基础功能"
+        
+        complexity_emoji = {
+            "simple": "🟢",
+            "medium": "🟡",
+            "complex": "🔴",
+        }.get(complexity, "⚪")
+        
+        card = {
+            "type": "template",
+            "data": {
+                "template_id": "AAqkz9",  # 飞书官方模板或自定义模板
+                "template_variable": {
+                    "task_id": task_id,
+                    "summary": summary,
+                    "tech_stack": tech_str,
+                    "features": features_str,
+                    "complexity": f"{complexity_emoji} {complexity}",
+                    "source": source,
+                    "queue_status": queue_status,
+                    "timeout_hours": timeout_minutes // 60,
+                }
+            }
+        }
+        
+        return card
+    
+    @staticmethod
+    def build_simple_confirmation_card(
+        task_id: str,
+        summary: str,
+        tech_stack: List[str],
+        features: List[str],
+        complexity: str,
+        source: str,
+        queue_status: str,
+        timeout_minutes: int,
+    ) -> Dict[str, Any]:
+        """Build a simple confirmation card without template."""
         
         tech_str = ", ".join(tech_stack) if tech_stack else "未识别"
         features_str = "\n".join([f"• {f}" for f in features]) if features else "• 基础功能"
@@ -289,15 +331,13 @@ class FeishuCardBuilder:
                 }
             })
         
-        elements.extend([
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"⏱️ 已用时: {elapsed_min}分{elapsed_sec}秒"
-                }
-            },
-        ])
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"⏱️ 已用时: {elapsed_min}分{elapsed_sec}秒"
+            }
+        })
         
         if repo_url:
             elements.append({
@@ -307,37 +347,6 @@ class FeishuCardBuilder:
                     "content": f"💾 代码仓库: [查看]({repo_url})"
                 }
             })
-        
-        if status == "waiting_input":
-            elements.extend([
-                {
-                    "tag": "hr"
-                },
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": "**❓ 需要您的确认**\n检测到需要人工介入，请查看详情"
-                    }
-                },
-                {
-                    "tag": "action",
-                    "actions": [
-                        {
-                            "tag": "button",
-                            "text": {
-                                "tag": "plain_text",
-                                "content": "查看详情"
-                            },
-                            "type": "primary",
-                            "value": {
-                                "task_id": task_id,
-                                "action": "view_detail"
-                            }
-                        }
-                    ]
-                },
-            ])
         
         return {
             "config": {
@@ -349,10 +358,10 @@ class FeishuCardBuilder:
 
 class DecisionManager:
     """
-    Decision Manager for user confirmation.
+    Decision Manager for user confirmation via Feishu private messages.
     
     Features:
-    - Send confirmation requests via Feishu cards
+    - Send confirmation requests via Feishu private chat
     - Receive user decisions via callbacks
     - Timeout handling
     - Reminder notifications
@@ -360,6 +369,17 @@ class DecisionManager:
     
     def __init__(self, config: Optional[DecisionConfig] = None):
         self.config = config or DecisionConfig()
+        
+        if not self.config.feishu_app_id:
+            self.config.feishu_app_id = os.getenv("FEISHU_APP_ID", "")
+        if not self.config.feishu_app_secret:
+            self.config.feishu_app_secret = os.getenv("FEISHU_APP_SECRET", "")
+        if not self.config.feishu_user_id:
+            self.config.feishu_user_id = os.getenv("FEISHU_USER_ID", "")
+        
+        self._tenant_access_token: Optional[str] = None
+        self._token_expires_at: float = 0
+        
         self._pending: Dict[str, PendingConfirmation] = {}
         self._card_builder = FeishuCardBuilder()
         self._on_decision: Optional[Callable[[str, Decision], None]] = None
@@ -375,36 +395,95 @@ class DecisionManager:
         """Set callback for when a decision is made."""
         self._on_decision = callback
     
-    def _send_feishu_message(self, content: Dict[str, Any]) -> Optional[str]:
-        """Send a message via Feishu webhook."""
-        if not self.config.feishu_webhook:
-            logger.warning("Feishu webhook not configured")
-            return None
+    def _get_tenant_access_token(self) -> Optional[str]:
+        """Get tenant access token from Feishu."""
+        if self._tenant_access_token and time.time() < self._token_expires_at - 60:
+            return self._tenant_access_token
+        
+        url = f"{self.config.base_url}/auth/v3/tenant_access_token/internal"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "app_id": self.config.feishu_app_id,
+            "app_secret": self.config.feishu_app_secret,
+        }
         
         try:
-            payload = {
-                "msg_type": "interactive",
-                "card": content,
-            }
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            data = response.json()
             
+            if data.get("code") == 0:
+                self._tenant_access_token = data.get("tenant_access_token")
+                self._token_expires_at = time.time() + data.get("expire", 7200)
+                logger.info("Feishu tenant access token obtained")
+                return self._tenant_access_token
+            else:
+                logger.error(f"Failed to get token: {data}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting token: {e}")
+            return None
+    
+    def _send_private_message(
+        self,
+        user_id: str,
+        content: Dict[str, Any],
+        msg_type: str = "interactive",
+    ) -> Optional[str]:
+        """
+        Send a private message to a user.
+        
+        Args:
+            user_id: The user's open_id or user_id
+            content: Message content
+            msg_type: Message type (text, interactive, etc.)
+            
+        Returns:
+            Message ID if successful, None otherwise
+        """
+        token = self._get_tenant_access_token()
+        if not token:
+            logger.error("No tenant access token available")
+            return None
+        
+        url = f"{self.config.base_url}/im/v1/messages"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        
+        params = {
+            "receive_id_type": "user_id",
+        }
+        
+        payload = {
+            "receive_id": user_id,
+            "msg_type": msg_type,
+            "content": json.dumps(content),
+        }
+        
+        try:
             response = requests.post(
-                self.config.feishu_webhook,
+                url,
+                params=params,
                 json=payload,
+                headers=headers,
                 timeout=10,
             )
             
-            if response.status_code != 200:
-                raise FeishuAPIError(f"Feishu API returned {response.status_code}")
+            data = response.json()
             
-            result = response.json()
-            if result.get("code") != 0:
-                raise FeishuAPIError(f"Feishu API error: {result.get('msg')}")
-            
-            return result.get("data", {}).get("message_id")
-            
+            if data.get("code") == 0:
+                message_id = data.get("data", {}).get("message_id")
+                logger.info(f"Message sent to user {user_id}: {message_id}")
+                return message_id
+            else:
+                logger.error(f"Failed to send message: {data}")
+                return None
+                
         except Exception as e:
-            logger.error(f"Failed to send Feishu message: {e}")
-            raise FeishuAPIError(f"Failed to send message: {e}")
+            logger.error(f"Error sending message: {e}")
+            return None
     
     def request_confirmation(
         self,
@@ -423,7 +502,7 @@ class DecisionManager:
         """
         self._stats["total_requests"] += 1
         
-        card = self._card_builder.build_task_confirmation_card(
+        card = self._card_builder.build_simple_confirmation_card(
             task_id=task_id,
             summary=task_data.get("summary", "未知任务"),
             tech_stack=task_data.get("tech_stack", []),
@@ -434,19 +513,28 @@ class DecisionManager:
             timeout_minutes=self.config.timeout // 60,
         )
         
-        message_id = self._send_feishu_message(card)
+        user_id = self.config.feishu_user_id
+        if not user_id:
+            logger.warning("No user ID configured for private messages")
+            return False
         
-        pending = PendingConfirmation(
-            task_id=task_id,
-            task_data=task_data,
-            message_id=message_id,
+        message_id = self._send_private_message(
+            user_id=user_id,
+            content=card,
+            msg_type="interactive",
         )
         
-        self._pending[task_id] = pending
-        
-        logger.info(f"Confirmation requested for task {task_id}")
-        
-        return True
+        if message_id:
+            pending = PendingConfirmation(
+                task_id=task_id,
+                task_data=task_data,
+                message_id=message_id,
+            )
+            self._pending[task_id] = pending
+            logger.info(f"Confirmation requested for task {task_id}")
+            return True
+        else:
+            return False
     
     def receive_decision(
         self,
@@ -519,7 +607,9 @@ class DecisionManager:
             self._stats["approved"] += 1
             return Decision.APPROVED
         
-        self.request_confirmation(task_id, task_data)
+        if not self.request_confirmation(task_id, task_data):
+            logger.warning(f"Failed to send confirmation request for {task_id}")
+            return Decision.TIMEOUT
         
         start_time = time.time()
         reminder_count = 0
@@ -564,24 +654,14 @@ class DecisionManager:
             f"剩余时间: {int(remaining // 60)} 分钟"
         )
         
-        try:
-            payload = {
-                "msg_type": "text",
-                "content": {
-                    "text": reminder_text,
-                },
-            }
-            
-            requests.post(
-                self.config.feishu_webhook,
-                json=payload,
-                timeout=10,
+        user_id = self.config.feishu_user_id
+        if user_id:
+            self._send_private_message(
+                user_id=user_id,
+                content={"text": reminder_text},
+                msg_type="text",
             )
-            
             logger.info(f"Reminder sent for task {task_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to send reminder: {e}")
     
     def cancel_pending(self, task_id: str) -> bool:
         """Cancel a pending confirmation."""
@@ -603,7 +683,7 @@ class DecisionManager:
             "pending_count": len(self._pending),
         }
     
-    def update_card(
+    def update_progress(
         self,
         task_id: str,
         status: str,
@@ -613,7 +693,7 @@ class DecisionManager:
         repo_url: Optional[str] = None,
     ) -> bool:
         """
-        Update the progress card for a task.
+        Send progress update to user.
         
         Args:
             task_id: Task identifier
@@ -640,6 +720,12 @@ class DecisionManager:
             repo_url=repo_url,
         )
         
-        self._send_feishu_message(card)
+        user_id = self.config.feishu_user_id
+        if user_id:
+            return self._send_private_message(
+                user_id=user_id,
+                content=card,
+                msg_type="interactive",
+            ) is not None
         
-        return True
+        return False
