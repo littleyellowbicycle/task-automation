@@ -10,12 +10,29 @@ logger = get_logger("feishu_bridge")
 
 
 class FeishuBridge:
-    def __init__(self, app_id: Optional[str] = None, app_secret: Optional[str] = None, table_id: Optional[str] = None, webhook_url: Optional[str] = None):
+    def __init__(
+        self, 
+        app_id: Optional[str] = None, 
+        app_secret: Optional[str] = None, 
+        table_id: Optional[str] = None, 
+        webhook_url: Optional[str] = None,
+        callback_url: Optional[str] = None,
+    ):
         self.app_id = app_id
         self.app_secret = app_secret
         self.table_id = table_id
         self.webhook_url = webhook_url
-        self.client = FeishuClient(app_id, app_secret, table_id, webhook_url=webhook_url)
+        self.callback_url = callback_url
+        self.client = FeishuClient(
+            app_id, app_secret, table_id, 
+            webhook_url=webhook_url,
+            callback_url=callback_url
+        )
+    
+    def set_callback_url(self, callback_url: str) -> None:
+        """Set the callback URL for approval cards."""
+        self.callback_url = callback_url
+        self.client.callback_url = callback_url
 
     def write_record(self, record: TaskRecord) -> bool:
         """Write a task record to Feishu."""

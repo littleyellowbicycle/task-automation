@@ -44,6 +44,7 @@ class CallbackServer:
         self.app = FastAPI(title="Task Automation Callback Server")
         self._decision_callback: Optional[Callable] = None
         self._pending_decisions: Dict[str, asyncio.Future] = {}
+        self._completed_decisions: Dict[str, str] = {}
         self._task_queue: Optional["TaskQueue"] = None
         self._feishu_client: Optional["FeishuClient"] = None
         self._on_approved: Optional[Callable] = None
@@ -121,6 +122,8 @@ class CallbackServer:
         
         if self._decision_callback:
             await self._decision_callback(task_id, action)
+        
+        self._completed_decisions[task_id] = action
         
         if task_id in self._pending_decisions:
             future = self._pending_decisions.pop(task_id)
@@ -222,7 +225,17 @@ class CallbackServer:
             if self._task_queue:
                 self._task_queue.timeout_task(task_id)
             return Decision.TIMEOUT.value
-
+    
+    def get_decision(self, task_id: str) -> Optional[str]:
+        """Get the decision for a task if it has been made."""
+        if task_id in self._completed_decisions:
+            return self._completed_decisions[task_id]
+        if task_id in self._pending_decisions:
+            future = self._pending_decisions[task_id]
+            if future.done():
+                return future.result()
+        return None
+    
     def run(self):
         import uvicorn
         logger.info(f"Starting callback server on {self.host}:{self.port}")

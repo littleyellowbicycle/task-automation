@@ -18,6 +18,7 @@ from ..code_executor import CodeExecutor
 from ..feishu_recorder.client import FeishuClient
 from ..feishu_recorder.feishu_bridge import FeishuBridge
 from ..decision_manager import DecisionManager, Decision
+from ..callback_server import CallbackServer
 from ..monitoring import get_monitoring_service
 from ..utils import get_logger
 from ..exceptions import WorkflowError
@@ -57,6 +58,9 @@ class WorkflowOrchestrator:
         feishu_client: Optional[FeishuClient] = None,
         feishu_bridge: Optional[FeishuBridge] = None,
         decision_manager: Optional[DecisionManager] = None,
+        callback_server: Optional[CallbackServer] = None,
+        callback_host: str = "0.0.0.0",
+        callback_port: int = 8080,
         dry_run: bool = False,
     ):
         """
@@ -71,6 +75,9 @@ class WorkflowOrchestrator:
             feishu_client: Feishu client instance
             feishu_bridge: Feishu bridge instance
             decision_manager: Decision manager instance
+            callback_server: Callback server instance (for receiving Feishu card callbacks)
+            callback_host: Host for callback server if not provided
+            callback_port: Port for callback server if not provided
             dry_run: If True, don't actually execute code
         """
         self.dry_run = dry_run
@@ -86,6 +93,15 @@ class WorkflowOrchestrator:
         self.feishu_bridge = feishu_bridge or FeishuBridge()
         self.decision_manager = decision_manager or DecisionManager()
         
+        # Initialize callback server
+        self.callback_server = callback_server or CallbackServer(
+            host=callback_host,
+            port=callback_port
+        )
+        
+        # Connect callback server to decision manager
+        self._setup_callback_integration()
+        
         # Monitoring service
         self.monitoring = get_monitoring_service()
         
@@ -93,6 +109,7 @@ class WorkflowOrchestrator:
         self.state = WorkflowState.IDLE
         self.current_task: Optional[TaskRecord] = None
         self._event_hooks: Dict[str, Callable] = {}
+        self._pending_tasks: Dict[str, QueuedTask] = {}
         
         # Register message handler
         self.message_gateway.register_handler(self._handle_standard_message)
@@ -108,7 +125,42 @@ class WorkflowOrchestrator:
             # No event loop running, will start later
             pass
         
-        logger.info("WorkflowOrchestrator initialized")
+        logger.info("WorkflowOrchestrator initialized with callback integration")
+    
+    def _setup_callback_integration(self):
+        """Setup integration between callback server and decision manager."""
+        self.callback_server.set_task_queue(self.task_queue)
+        self.callback_server.set_feishu_client(self.feishu_client)
+        
+        callback_url = self.get_callback_url()
+        self.feishu_bridge.set_callback_url(callback_url)
+        
+        self.callback_server.set_decision_callback(
+            lambda task_id, action: self.decision_manager.receive_decision(task_id, action)
+        )
+        
+        self.callback_server.on_approved(self._on_task_approved)
+        self.callback_server.on_rejected(self._on_task_rejected)
+        self.callback_server.on_later(self._on_task_later)
+        
+        logger.info(f"Callback server integrated with Decision manager, callback URL: {callback_url}")
+    
+    async def _on_task_approved(self, task_id: str):
+        """Handle task approval from callback."""
+        logger.info(f"Task {task_id} approved via callback")
+        queued_task = self._pending_tasks.get(task_id)
+        if queued_task:
+            queued_task.metadata["decision"] = "approved"
+    
+    async def _on_task_rejected(self, task_id: str):
+        """Handle task rejection from callback."""
+        logger.info(f"Task {task_id} rejected via callback")
+        if task_id in self._pending_tasks:
+            del self._pending_tasks[task_id]
+    
+    async def _on_task_later(self, task_id: str):
+        """Handle task deferred from callback."""
+        logger.info(f"Task {task_id} deferred via callback")
     
     def on(self, event: str, callback: Callable):
         """Register an event hook."""
@@ -194,20 +246,19 @@ class WorkflowOrchestrator:
         start_time = time.time()
         task_id = queued_task.task_id
         
+        self._pending_tasks[task_id] = queued_task
+        
         try:
             task_data = queued_task.data
             
-            # Reconstruct task record
             task_record = TaskRecord(**task_data["task_record"])
             self.current_task = task_record
             
-            # Analysis
             self.state = WorkflowState.ANALYZING
             analysis_start = time.time()
             analysis = self.task_analyzer.analyze(task_record.raw_message)
             analysis_duration = time.time() - analysis_start
             
-            # Record LLM inference time
             self.monitoring.record_llm_inference(analysis_duration)
             
             task_record.summary = analysis.get("summary", "")
@@ -218,52 +269,68 @@ class WorkflowOrchestrator:
             logger.info(f"Task analyzed: {task_id}, complexity: {task_record.complexity}, analysis time: {analysis_duration:.2f}s")
             await self._trigger_event("on_task_analyzed", task_record)
             
-            # Send approval card
-            if not self.dry_run:
-                self.feishu_bridge.send_approval_card(task_record)
+            callback_url = self.get_callback_url()
             
-            # Confirmation
+            if not self.dry_run:
+                self.feishu_bridge.send_approval_card(task_record, callback_url=callback_url)
+            
             self.state = WorkflowState.AWAITING_CONFIRMATION
-            confirmation = await self.decision_manager.wait_confirmation(
-                task_id, 
-                task_record, 
-                auto_confirm=self.dry_run
-            )
+            
+            if self.dry_run:
+                confirmation = Decision.APPROVED
+            else:
+                decision_action = await self.callback_server.wait_for_decision(
+                    task_id,
+                    timeout=self.decision_manager.config.timeout
+                )
+                
+                if decision_action is None:
+                    confirmation = Decision.TIMEOUT
+                elif decision_action == "approve":
+                    confirmation = Decision.APPROVED
+                elif decision_action == "reject":
+                    confirmation = Decision.REJECTED
+                elif decision_action == "later":
+                    confirmation = Decision.LATER
+                else:
+                    confirmation = Decision.TIMEOUT
             
             if confirmation == Decision.REJECTED:
                 task_record.status = TaskStatus.CANCELLED
                 await self._trigger_event("on_task_cancelled", task_record)
                 self.state = WorkflowState.CANCELLED
-                # Record task duration
                 task_duration = time.time() - start_time
                 self.monitoring.record_task_duration(task_duration)
+                self._pending_tasks.pop(task_id, None)
                 return
             
             if confirmation == Decision.TIMEOUT:
                 task_record.status = TaskStatus.TIMEOUT
                 await self._trigger_event("on_task_timeout", task_record)
                 self.state = WorkflowState.FAILED
-                # Record task failure
                 self.monitoring.record_task_failed()
-                # Record task duration
                 task_duration = time.time() - start_time
                 self.monitoring.record_task_duration(task_duration)
+                self._pending_tasks.pop(task_id, None)
+                return
+            
+            if confirmation == Decision.LATER:
+                logger.info(f"Task {task_id} deferred, requeueing...")
+                self._pending_tasks.pop(task_id, None)
                 return
             
             task_record.status = TaskStatus.APPROVED
             await self._trigger_event("on_task_confirmed", task_record)
             
-            # Execution
             self.state = WorkflowState.EXECUTING
             task_record.status = TaskStatus.EXECUTING
-            logger.info("Executing code generation...")
+            logger.info(f"Executing task {task_id}...")
             
             execution_start = time.time()
             instruction = f"创建代码: {task_record.summary}"
             result = await self.code_executor.execute(instruction, dry_run=self.dry_run)
             execution_duration = time.time() - execution_start
             
-            # Record OpenCode execution time
             self.monitoring.record_opencode_execution(execution_duration)
             
             task_record.executor_result = result.stdout if result.success else result.stderr
@@ -272,28 +339,22 @@ class WorkflowOrchestrator:
             
             await self._trigger_event("on_task_executed", task_record, result)
             
-            # Recording
             self.state = WorkflowState.RECORDING
             task_record.status = TaskStatus.COMPLETED if result.success else TaskStatus.FAILED
             task_record.completed_at = datetime.now(timezone.utc)
             
             if not self.dry_run:
                 self.feishu_client.create_record(task_record)
-                # Send notification card
                 message = f"任务已{'成功完成' if result.success else '失败'}"
                 self.feishu_bridge.send_notification_card(task_record, message)
             
-            # Record task status
             if result.success:
                 self.monitoring.record_task_completed()
             else:
                 self.monitoring.record_task_failed()
             
-            # Record task duration
             task_duration = time.time() - start_time
             self.monitoring.record_task_duration(task_duration)
-            
-            # Update queue size
             self.monitoring.record_queue_size(self.task_queue.size)
             
             await self._trigger_event("on_task_completed", task_record)
@@ -301,19 +362,19 @@ class WorkflowOrchestrator:
             self.state = WorkflowState.COMPLETED
             logger.info(f"Task completed: {task_id}, duration: {task_duration:.2f}s")
             
+            self._pending_tasks.pop(task_id, None)
+            
         except Exception as e:
             logger.error(f"Error processing task {task_id}: {e}")
             if self.current_task:
                 self.current_task.status = TaskStatus.FAILED
                 self.current_task.error_message = str(e)
-            # Record task failure
             self.monitoring.record_task_failed()
-            # Record task duration
             task_duration = time.time() - start_time
             self.monitoring.record_task_duration(task_duration)
-            # Update queue size
             self.monitoring.record_queue_size(self.task_queue.size)
             await self._trigger_event("on_task_failed", self.current_task, e)
+            self._pending_tasks.pop(task_id, None)
             raise
     
     async def process_raw_message(self, raw_message: Dict[str, Any], platform: str = "wework", listener_type: str = "unknown"):
@@ -403,3 +464,45 @@ class WorkflowOrchestrator:
     def get_gateway_stats(self) -> Dict[str, Any]:
         """Get gateway statistics."""
         return self.message_gateway.stats
+    
+    def start_callback_server(self) -> None:
+        """Start the callback server in a background thread."""
+        import threading
+        
+        if hasattr(self, '_callback_thread') and self._callback_thread.is_alive():
+            logger.warning("Callback server already running")
+            return
+        
+        def run_server():
+            import uvicorn
+            logger.info(f"Starting callback server on {self.callback_server.host}:{self.callback_server.port}")
+            uvicorn.run(
+                self.callback_server.app,
+                host=self.callback_server.host,
+                port=self.callback_server.port,
+                log_level="warning"
+            )
+        
+        self._callback_thread = threading.Thread(target=run_server, daemon=True)
+        self._callback_thread.start()
+        logger.info("Callback server started in background thread")
+    
+    def stop_callback_server(self) -> None:
+        """Stop the callback server."""
+        logger.info("Stopping callback server...")
+    
+    async def run_async(self) -> None:
+        """Run the workflow orchestrator asynchronously."""
+        self.start_callback_server()
+        
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            logger.info("Workflow orchestrator stopped")
+        finally:
+            self.stop_callback_server()
+    
+    def get_callback_url(self) -> str:
+        """Get the callback URL for Feishu card actions."""
+        return f"http://{self.callback_server.host}:{self.callback_server.port}{self.callback_server.callback_path}"

@@ -246,7 +246,10 @@ class FeishuClient:
         content: Dict[str, Any],
         msg_type: str = "interactive",
     ) -> Optional[str]:
-        """Send a private message to a user."""
+        """Send a private message to a user.
+        
+        For interactive cards, content should be the card JSON directly (not wrapped in {"type": "interactive", "card": ...}).
+        """
         token = self._get_tenant_access_token()
         if not token:
             logger.warning("No token, skipping private message")
@@ -258,6 +261,11 @@ class FeishuClient:
             "Content-Type": "application/json; charset=utf-8",
         }
         params = {"receive_id_type": "user_id"}
+        
+        if msg_type == "interactive" and isinstance(content, dict):
+            if "type" in content and "card" in content:
+                content = content["card"]
+        
         payload = {
             "receive_id": user_id,
             "msg_type": msg_type,
