@@ -504,5 +504,23 @@ class WorkflowOrchestrator:
             self.stop_callback_server()
     
     def get_callback_url(self) -> str:
-        """Get the callback URL for Feishu card actions."""
-        return f"http://{self.callback_server.host}:{self.callback_server.port}{self.callback_server.callback_path}"
+        """Get the callback URL for Feishu card actions.
+        
+        Uses PUBLIC_CALLBACK_URL from environment if set (for ngrok tunnel),
+        otherwise falls back to local callback server URL.
+        """
+        import os
+        
+        public_url = os.getenv("PUBLIC_CALLBACK_URL", "").strip()
+        if public_url:
+            # Remove trailing slash if present
+            public_url = public_url.rstrip("/")
+            logger.info(f"Using public callback URL: {public_url}")
+            return public_url
+        
+        # Fallback to local callback server
+        local_url = f"http://{self.callback_server.host}:{self.callback_server.port}{self.callback_server.callback_path}"
+        logger.warning(f"PUBLIC_CALLBACK_URL not set, using local URL: {local_url}")
+        logger.warning("Feishu callbacks will not work from external network!")
+        logger.warning("Set PUBLIC_CALLBACK_URL or run: ./start_with_ngrok.sh")
+        return local_url
