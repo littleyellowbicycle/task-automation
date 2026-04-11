@@ -47,4 +47,16 @@ check_node_deps
 echo ""
 echo "Starting application..."
 cd "$SCRIPT_DIR"
-python main.py "$@"
+
+# Find python command
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+else
+    echo "❌ Python not found. Please install Python 3.10+"
+    exit 1
+fi
+
+echo "Using Python: $PYTHON_CMD"
+$PYTHON_CMD main.py "$@"

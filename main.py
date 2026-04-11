@@ -5,12 +5,16 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Add src to path
+from dotenv import load_dotenv
+
+load_dotenv()
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config.config_manager import ConfigManager
 from src.workflow_orchestrator import WorkflowOrchestrator
 from src.wechat_listener.factory import ListenerFactory
+from src.wechat_listener.base import ListenerType, Platform
 from src.monitoring import initialize_monitoring, MetricConfig, AlertConfig
 from src.feishu_recorder.feishu_bridge import FeishuBridge
 from src.feishu_recorder.server import create_feishu_server
@@ -155,16 +159,36 @@ async def main_async(args):
 
     # Create listener using factory
     try:
-        listener = ListenerFactory.create_from_config(config.wechat)
+        listener_type = ListenerType(config.wechat.listener_type)
+        platform = Platform(config.wechat.platform)
+        listener = ListenerFactory.create(
+            listener_type=listener_type,
+            platform=platform,
+            keywords=config.task_filters.keywords,
+            regex_patterns=config.task_filters.regex_patterns,
+            poll_interval=config.wechat.uiautomation.poll_interval,
+            max_history=config.wechat.uiautomation.max_history,
+        )
     except Exception as e:
         logger.error(f"Failed to create listener: {e}")
         sys.exit(1)
 
     # Set up message callback
-    async def on_message(raw_message: dict):
-        logger.info(f"Message received: {raw_message.get('content', '')[:50]}...")
+    from src.wechat_listener.base import MessageCallback
+    
+    async def on_message_callback(message):
+        logger.info(f"Message received: {message.content[:50] if message.content else ''}...")
         try:
-            # Process through workflow
+            raw_message = {
+                "msg_id": message.msg_id,
+                "content": message.content,
+                "sender_id": message.sender_id,
+                "sender_name": message.sender_name,
+                "conversation_id": message.conversation_id,
+                "conversation_type": "group" if message.conversation_type.value == "group" else "private",
+                "timestamp": message.timestamp,
+                "msg_type": message.msg_type.value if hasattr(message.msg_type, 'value') else "text",
+            }
             await orchestrator.process_raw_message(
                 raw_message,
                 platform=config.wechat.platform,
@@ -172,24 +196,26 @@ async def main_async(args):
             )
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-
-    listener.on_message = on_message
+    
+    listener.set_callback(MessageCallback(on_message=on_message_callback))
 
     # Start listening
     try:
-        await listener.start()
-        logger.info("Listener started successfully")
+        await listener.connect()
+        logger.info("Listener connected successfully")
         
-        # Keep the program running
-        while True:
+        listener.start_background()
+        logger.info("Listener started in background")
+        
+        while listener.is_running:
             await asyncio.sleep(1)
             
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-        await listener.stop()
+        listener.disconnect()
     except Exception as e:
         logger.error(f"Failed to start listener: {e}")
-        logger.error("Make sure the listener is properly configured")
+        logger.error("Make sure WeChat/WeWork is running and visible")
         sys.exit(1)
 
 

@@ -120,4 +120,15 @@ echo -e "${BLUE}[5/5] Starting application...${NC}"
 echo ""
 
 cd "$SCRIPT_DIR"
-exec ./start.sh "$@"
+
+# Check if start.sh exists
+if [ ! -f "$SCRIPT_DIR/start.sh" ]; then
+    echo -e "${RED}❌ start.sh not found at $SCRIPT_DIR/start.sh${NC}"
+    echo "Current directory: $(pwd)"
+    echo "Files in current directory:"
+    ls -la
+    exit 1
+fi
+
+# Source the start script instead of exec to preserve environment
+bash "$SCRIPT_DIR/start.sh" "$@"
