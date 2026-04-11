@@ -1,0 +1,10 @@
+{
+  "name": "task-automation-third-party",
+  "version": "1.0.0",
+  "description": "Third-party dependencies for task automation system",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@opencode-ai/sdk": "latest"
+  }
+}

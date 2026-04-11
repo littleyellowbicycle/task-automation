@@ -345,8 +345,6 @@ class OpenCodeExecutor(BaseExecutor):
             
             bridge_script = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "third_party",
-                "nodejs",
                 "scripts",
                 "opencode_bridge.mjs"
             )
@@ -360,8 +358,13 @@ class OpenCodeExecutor(BaseExecutor):
             wsl_work_dir = work_dir.replace("\\", "/").replace("D:", "/mnt/d").replace("C:", "/mnt/c")
             wsl_bridge_script = bridge_script.replace("\\", "/").replace("D:", "/mnt/d").replace("C:", "/mnt/c")
             
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            wsl_node_modules = os.path.join(project_root, "third_party", "nodejs", "node_modules")
+            wsl_node_modules = wsl_node_modules.replace("\\", "/").replace("D:", "/mnt/d").replace("C:", "/mnt/c")
+            
             cmd = [
                 "wsl", "node",
+                "--require", f"{wsl_node_modules}/@opencode-ai/sdk/dist/index.js",
                 wsl_bridge_script,
                 "--task", instruction,
                 "--task-id", task_id,
@@ -371,6 +374,9 @@ class OpenCodeExecutor(BaseExecutor):
                 "--model-id", self.config.model_id or "minimax-m2.5-free",
             ]
             
+            env = os.environ.copy()
+            env["NODE_PATH"] = wsl_node_modules
+            
             logger.info(f"Running OpenCode SDK bridge via WSL: {' '.join(cmd)}")
             
             process = subprocess.Popen(
@@ -378,6 +384,7 @@ class OpenCodeExecutor(BaseExecutor):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=env,
             )
             
             stdout, stderr = process.communicate(timeout=self.config.timeout)

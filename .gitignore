@@ -64,3 +64,8 @@ temp/
 *.pem
 *.key
 credentials.json
+
+# Node.js - third-party dependencies
+node_modules/
+third_party/nodejs/node_modules/
+package-lock.json
