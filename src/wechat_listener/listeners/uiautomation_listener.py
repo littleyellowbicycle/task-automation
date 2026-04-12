@@ -166,19 +166,20 @@ class UIAutomationListener(BaseListener):
     def _find_message_list(self) -> Optional[Any]:
         if not self._wechat_window:
             return None
-        
+
         list_control = self._wechat_window.ListControl(Name="消息")
-        if list_control and list_control.Exists(0, 0):
+        if list_control.Exists(0, 0):
+            logger.debug("Found message list by Name='消息'")
             return list_control
-        
-        list_control = self._wechat_window.ListControl(SubName="消息")
-        if list_control and list_control.Exists(0, 0):
-            return list_control
-        
-        list_controls = self._wechat_window.GetListControl()
-        if list_controls:
-            return list_controls
-        
+
+        for lc in self._wechat_window.GetChildren():
+            if lc.ControlTypeName == "ListControl":
+                children = lc.GetChildren()
+                if len(children) > 0:
+                    logger.debug(f"Found message list by type scan ({len(children)} items)")
+                    return lc
+
+        logger.warning("Could not find message list control")
         return None
     
     def _get_current_conversation(self) -> Optional[ConversationInfo]:
@@ -344,11 +345,11 @@ class UIAutomationListener(BaseListener):
     def get_contacts(self) -> List[dict]:
         if not self._wechat_window:
             return []
-        
+
         contacts = []
         try:
             contact_list = self._wechat_window.ListControl(Name="联系人")
-            if contact_list:
+            if contact_list and contact_list.Exists(0, 0):
                 items = contact_list.GetChildren()
                 for item in items:
                     name = item.Name
@@ -356,25 +357,35 @@ class UIAutomationListener(BaseListener):
                         contacts.append({"name": name, "id": name})
         except Exception as e:
             logger.error(f"Error getting contacts: {e}")
-        
+
         return contacts
     
     def get_rooms(self) -> List[dict]:
         if not self._wechat_window:
             return []
-        
+
         rooms = []
         try:
             chat_list = self._wechat_window.ListControl(Name="聊天列表")
-            if chat_list:
+            if chat_list and chat_list.Exists(0, 0):
                 items = chat_list.GetChildren()
                 for item in items:
                     name = item.Name
                     if name and ("群" in name or "(" in name or "（" in name):
                         rooms.append({"name": name, "id": name})
+            else:
+                for child in self._wechat_window.GetChildren():
+                    if child.ControlTypeName == "ListControl":
+                        items = child.GetChildren()
+                        for item in items:
+                            name = item.Name
+                            if name and ("群" in name or "(" in name or "（" in name):
+                                rooms.append({"name": name, "id": name})
+                        if rooms:
+                            break
         except Exception as e:
             logger.error(f"Error getting rooms: {e}")
-        
+
         return rooms
     
     def send_text(self, conversation_id: str, content: str) -> bool:

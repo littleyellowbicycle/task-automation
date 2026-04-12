@@ -3,7 +3,7 @@
 from typing import Optional, List, Any, Dict
 
 from .base import BaseListener, ListenerType, Platform
-from .listeners import NtWorkListener, WebhookListener, UIAutomationListener
+from .listeners import NtWorkListener, WebhookListener, UIAutomationListener, OCRListener
 from ..utils import get_logger
 from ..exceptions import ConfigurationError
 
@@ -22,6 +22,7 @@ class ListenerFactory:
         ListenerType.NTWORK: NtWorkListener,
         ListenerType.WEBHOOK: WebhookListener,
         ListenerType.UIAUTOMATION: UIAutomationListener,
+        ListenerType.OCR: OCRListener,
     }
     
     @classmethod

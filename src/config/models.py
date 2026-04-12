@@ -23,8 +23,14 @@ class UIAutomationListenerConfig(BaseModel):
     max_history: int = 100
 
 
+class OCRListenerConfig(BaseModel):
+    poll_interval: float = 2.0
+    crop_ratio: List[float] = [0.22, 0.0, 1.0, 0.92]
+    message_region_height: int = 200
+
+
 class WeChatConfig(BaseModel):
-    listener_type: Literal["ntwork", "webhook", "uiautomation"] = "uiautomation"
+    listener_type: Literal["ntwork", "webhook", "uiautomation", "ocr"] = "ocr"
     platform: Literal["wework", "wechat"] = "wework"
     device_id: str = ""
     ip: str = "127.0.0.1"
@@ -36,6 +42,7 @@ class WeChatConfig(BaseModel):
     ntwork: NtWorkListenerConfig = Field(default_factory=NtWorkListenerConfig)
     webhook: WebhookListenerConfig = Field(default_factory=WebhookListenerConfig)
     uiautomation: UIAutomationListenerConfig = Field(default_factory=UIAutomationListenerConfig)
+    ocr: OCRListenerConfig = Field(default_factory=OCRListenerConfig)
 
 
 class OllamaConfig(BaseModel):

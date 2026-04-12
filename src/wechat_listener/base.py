@@ -13,6 +13,7 @@ class ListenerType(str, Enum):
     NTWORK = "ntwork"
     WEBHOOK = "webhook"
     UIAUTOMATION = "uiautomation"
+    OCR = "ocr"
 
 
 class Platform(str, Enum):

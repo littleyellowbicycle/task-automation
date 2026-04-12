@@ -5,7 +5,7 @@ from .factory import ListenerFactory
 from .parser import MessageParser
 from .models import WeChatMessage, TaskMessage, MessageType, ConversationType
 
-from .listeners import NtWorkListener, WebhookListener, UIAutomationListener
+from .listeners import NtWorkListener, WebhookListener, UIAutomationListener, OCRListener
 
 __all__ = [
     "BaseListener",
@@ -21,4 +21,5 @@ __all__ = [
     "NtWorkListener",
     "WebhookListener",
     "UIAutomationListener",
+    "OCRListener",
 ]

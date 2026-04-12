@@ -1,5 +1,5 @@
 wechat:
-  listener_type: "uiautomation"
+  listener_type: "ocr"
   platform: "wework"
   device_id: ""
   ip: "127.0.0.1"
@@ -21,6 +21,10 @@ wechat:
   uiautomation:
     poll_interval: 0.5
     max_history: 100
+  ocr:
+    poll_interval: 2.0
+    crop_ratio: [0.22, 0.0, 1.0, 0.92]
+    message_region_height: 200
 
 llm:
   default_provider: "ollama"

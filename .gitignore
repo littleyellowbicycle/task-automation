@@ -69,3 +69,12 @@ credentials.json
 node_modules/
 third_party/nodejs/node_modules/
 package-lock.json
+
+# PaddleOCR models - large binary files
+models/
+
+# Automation logs
+@AutomationLog.txt
+
+# Diagnostics scripts
+diagnose_*.py
