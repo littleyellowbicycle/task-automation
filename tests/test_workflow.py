@@ -10,10 +10,12 @@ import sys
 import asyncio
 from datetime import datetime
 
+import pytest
+
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -24,6 +26,7 @@ from src.feishu_recorder import FeishuClient
 from src.callback_server import CallbackServer
 
 
+@pytest.mark.integration
 async def test_complete_workflow():
     """测试完整的工作流程"""
     print("\n" + "=" * 60)

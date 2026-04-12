@@ -8,7 +8,8 @@ from typing import Optional, Callable, Dict, Any, List
 from datetime import datetime, timezone
 
 from ..wechat_listener.models import TaskMessage, WeChatMessage
-from ..gateway import MessageGateway, StandardMessage
+from ..gateway.models.messages import StandardMessage
+from ..gateway.core.message_processor import MessageProcessor
 from ..filter import TaskFilter, FilterResult, DeduplicationResult
 from ..queue import TaskQueue, QueueConfig, QueuedTask, TaskStatus, TaskPriority
 from ..feishu_recorder.models import TaskRecord
@@ -50,7 +51,7 @@ class WorkflowOrchestrator:
     
     def __init__(
         self,
-        message_gateway: Optional[MessageGateway] = None,
+        message_gateway: Optional[MessageProcessor] = None,
         task_filter: Optional[TaskFilter] = None,
         task_queue: Optional[TaskQueue] = None,
         llm_router: Optional[LLMRouter] = None,
@@ -83,7 +84,7 @@ class WorkflowOrchestrator:
         self.dry_run = dry_run
         
         # Initialize components
-        self.message_gateway = message_gateway or MessageGateway()
+        self.message_gateway = message_gateway or MessageProcessor()
         self.task_filter = task_filter or TaskFilter()
         self.task_queue = task_queue or TaskQueue(QueueConfig())
         self.llm_router = llm_router or LLMRouter()

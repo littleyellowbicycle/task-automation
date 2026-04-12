@@ -2,6 +2,7 @@
 
 import asyncio
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Optional, List
 from pathlib import Path
@@ -94,7 +95,6 @@ class CodeExecutor:
         Returns:
             ExecutionResult
         """
-        import time
         start_time = time.time()
         
         if dry_run:

@@ -5,6 +5,8 @@ from typing import Any, Dict, List
 import yaml
 from types import SimpleNamespace
 
+from .models import AppConfig
+
 
 class ConfigManager:
     """Minimal configuration manager with YAML + environment variable overrides."""
@@ -119,9 +121,48 @@ class ConfigManager:
                 "token_refresh_buffer": 300,
             },
             "gateway": {
+                "host": "0.0.0.0",
+                "port": 8000,
+                "mode": "standalone",
                 "dedup_enabled": True,
                 "dedup_max_cache": 1000,
                 "dedup_ttl": 3600,
+            },
+            "worker_urls": {
+                "analysis_url": "http://localhost:8001",
+                "decision_url": "http://localhost:8002",
+                "execution_url": "http://localhost:8003",
+                "recording_url": "http://localhost:8004",
+            },
+            "filter_analysis_worker": {
+                "host": "0.0.0.0",
+                "port": 8001,
+                "gateway_url": "http://localhost:8000",
+            },
+            "decision_worker": {
+                "host": "0.0.0.0",
+                "port": 8002,
+                "gateway_url": "http://localhost:8000",
+            },
+            "execution_worker": {
+                "host": "0.0.0.0",
+                "port": 8003,
+                "gateway_url": "http://localhost:8000",
+                "opencode_host": "localhost",
+                "opencode_port": 18792,
+                "work_dir": "./workspace",
+                "timeout": 600,
+            },
+            "recording_worker": {
+                "host": "0.0.0.0",
+                "port": 8004,
+                "gateway_url": "http://localhost:8000",
+            },
+            "listener_push": {
+                "gateway_url": "http://localhost:8000",
+                "timeout": 10.0,
+                "max_retries": 3,
+                "retry_delay": 1.0,
             },
             "filter": {
                 "model_name": "Qwen/Qwen3-0.6B",
@@ -317,3 +358,7 @@ class ConfigManager:
 
     def as_dict(self) -> Dict[str, Any]:
         return dict(self._config)
+
+    @property
+    def config(self) -> AppConfig:
+        return AppConfig(**self._config)

@@ -34,7 +34,7 @@ def print_separator(title: str = ""):
         print("=" * 60)
 
 
-def test_get_token(client: FeishuClient):
+def check_get_token(client: FeishuClient):
     """测试获取 tenant_access_token"""
     print_separator("测试 1: 获取 tenant_access_token")
     
@@ -51,7 +51,7 @@ def test_get_token(client: FeishuClient):
         return False
 
 
-def test_send_private_message(client: FeishuClient):
+def check_send_private_message(client: FeishuClient):
     """测试发送私聊消息"""
     print_separator("测试 2: 发送私聊消息")
     
@@ -101,7 +101,7 @@ def test_send_private_message(client: FeishuClient):
         return False
 
 
-def test_create_record(client: FeishuClient):
+def check_create_record(client: FeishuClient):
     """测试创建多维表格记录（测试后自动清理）"""
     print_separator("测试 3: 创建多维表格记录")
     
@@ -143,7 +143,7 @@ def test_create_record(client: FeishuClient):
         return False
 
 
-def test_task_card(client: FeishuClient):
+def check_task_card(client: FeishuClient):
     """测试发送任务审批卡片"""
     print_separator("测试 4: 发送任务审批卡片")
     
@@ -226,12 +226,12 @@ def main():
     
     results = {}
     
-    results["token"] = test_get_token(client)
+    results["token"] = check_get_token(client)
     
     if results["token"]:
-        results["private_message"] = test_send_private_message(client)
-        results["task_card"] = test_task_card(client)
-        results["create_record"] = test_create_record(client)
+        results["private_message"] = check_send_private_message(client)
+        results["task_card"] = check_task_card(client)
+        results["create_record"] = check_create_record(client)
     
     print_separator("测试结果汇总")
     

@@ -1,288 +1,303 @@
-# 企业微信任务自动化系统 - 项目规划
+# 企业微信任务自动化系统
 
 > 从企业微信群捕获任务消息 → LLM分析 → 用户确认 → OpenCode执行 → 飞书记录
 
-## 一、项目目标
+## 项目概述
 
-构建一个自动化流水线：从企业微信群捕获任务消息 → LLM分析 → 用户确认 → OpenCode执行代码生成 → 飞书多维表格记录
+本系统通过 API Gateway + Workers 微服务架构，实现从企业微信群消息到代码生成的全链路自动化。网关作为唯一公网入口，负责消息分发和路由，各业务模块通过 REST API 通信，可独立部署和扩展。
 
-## 二、技术架构
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           用户 (你)                                         │
-│                  确认/取消任务 │  查看飞书记录                               │
-└───────────────────────────────┬─────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      主流程编排器 (WorkflowOrchestrator)                     │
-│    状态机管理 │ 事件驱动 │ 错误恢复 │ 日志记录                              │
-└──────────┬──────────┬──────────┬──────────┬──────────┬────────────────────┘
-           │          │          │          │          │
-           ▼          ▼          ▼          ▼          ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│  Webhook     │ │   LLM        │ │    任务      │ │   OpenCode   │ │    飞书      │
-│  消息接收    │ │   调度器     │ │    分析器    │ │   执行器     │ │    记录器    │
-│              │ │              │ │              │ │              │ │              │
-│  FastAPI     │ │  Ollama+     │ │  消息解析    │ │  代码生成    │ │  多维表格    │
-│  端点        │ │  Claude路由  │ │  摘要生成    │ │  执行        │ │  记录        │
-└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
-```
-
-## 三、核心模块
-
-| 模块 | 职责 | 关键类/函数 |
-|------|------|-------------|
-| **wechat_listener** | 接收企微群消息 | `WebhookServer`, `MessageParser` |
-| **llm_router** | LLM智能路由 (本地/云端) | `LLMRouter`, `OllamaProvider`, `ClaudeProvider` |
-| **task_analyzer** | 任务分析和摘要提取 | `TaskAnalyzer` |
-| **code_executor** | OpenCode调用封装 | `CodeExecutor` |
-| **feishu_recorder** | 飞书多维表格记录 | `FeishuClient`, `TaskRecord` |
-| **decision_manager** | 用户决策确认 | `DecisionManager` |
-| **workflow_orchestrator** | 主流程编排 | `WorkflowOrchestrator` |
-| **config** | 配置和日志管理 | `ConfigManager` |
-
-## 四、完整流程
+## 架构设计
 
 ```
-1️⃣ 捕获消息
-┌─────────────┐
-│ 企微群机器人 │ ──POST──→ Webhook服务器 ──→ 消息解析
-└─────────────┘
-     │
-     ▼
-2️⃣ 过滤识别
-┌─────────────────────────────────────┐
-│ 关键词: "项目发布"、"需求"、"开发任务" │ ── 匹配 ──→ 进入处理流程
-│ 排除词: "测试"、"内部"              │ ── 匹配 ──→ 忽略
-└─────────────────────────────────────┘
-     │
-     ▼
-3️⃣ LLM分析
-┌─────────────────────────────────────┐
-│ • 提取需求摘要 (50字内)             │
-│ • 识别技术栈 (Python/React/...)     │
-│ • 提取核心功能点                    │
-│ • 评估复杂度 (simple/medium/complex)│
-└─────────────────────────────────────┘
-     │
-     ▼
-4️⃣ 用户确认
-┌─────────────────────────────────────┐
-│ 发送确认消息到企微私聊:             │
-│ 📋 任务摘要: xxx                    │
-│ 🛠️ 技术栈: xxx                      │
-│ ⚡ 功能点: xxx                       │
-│                                     │
-│ 回复 "确认" 执行 / "取消" 终止      │
-│ ⏱️ 超时: 5分钟                       │
-└─────────────────────────────────────┘
-     │
-     ▼
-5️⃣ OpenCode执行
-┌─────────────────────────────────────┐
-│ • 转换任务为OpenCode指令            │
-│ • 设置工作目录                      │
-│ • 执行代码生成                      │
-│ • 捕获执行结果和仓库链接            │
-└─────────────────────────────────────┘
-     │
-     ▼
-6️⃣ 飞书记录
-┌─────────────────────────────────────┐
-│ 多维表格记录:                        │
-│ • task_id: 任务ID                   │
-│ • raw_message: 原始消息             │
-│ • summary: LLM摘要                  │
-│ • tech_stack: 技术栈                │
-│ • status: 状态流转                  │
-│ • code_repo_url: 代码仓库链接        │
-│ • created_at/updated_at: 时间       │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              外部系统                                        │
+│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │
+│   │  企业微信     │    │   飞书服务器   │    │  用户浏览器   │                  │
+│   │  (群消息)     │    │  (卡片回调)   │    │  (管理界面)   │                  │
+│   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘                  │
+└──────────┼───────────────────┼───────────────────┼───────────────────────────┘
+           │                   │                   │
+           ▼                   ▼                   ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         API Gateway (公网部署)                               │
+│                                                                              │
+│   ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐   │
+│   │ 消息处理器   │  │  任务管理器   │  │  队列管理器   │  │  消息路由器   │   │
+│   │ (校验/去重)  │  │ (状态机)     │  │ (FIFO队列)   │  │ (分发调度)    │   │
+│   └─────────────┘  └──────────────┘  └──────────────┘  └───────────────┘   │
+│                                                                              │
+│   REST API: /api/v1/listener/*  /api/v1/feishu/*  /api/v1/decisions/*      │
+│             /api/v1/tasks/*  /api/v1/queue/*  /health                       │
+└──────────┬──────────┬──────────┬──────────┬─────────────────────────────────┘
+           │          │          │          │
+           ▼          ▼          ▼          ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│  分析 Worker  │ │  决策 Worker  │ │  执行 Worker  │ │  记录 Worker  │
+│              │ │              │ │              │ │              │
+│ 消息过滤     │ │ 飞书卡片推送  │ │ OpenCode调用 │ │ 飞书表格记录 │
+│ 任务识别     │ │ 用户确认/取消 │ │ 代码生成执行 │ │ 状态通知推送 │
+│ LLM分析     │ │ 超时处理     │ │ 结果收集     │ │ Webhook通知  │
+└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
-## 五、LLM混合调度策略
+### 核心设计原则
 
-### 复杂度判断规则
+- **网关只做分发**：不执行具体业务逻辑，只负责消息校验、标准化、路由
+- **消除内网穿透**：网关部署在公网，飞书回调直接打到网关
+- **模块解耦**：各 Worker 通过 REST API 通信，可独立部署和扩展
+- **双模式部署**：支持单进程模式（开发）和分布式模式（生产）
+
+## 任务状态流转
+
+```
+received → filtering → awaiting_confirmation → approved → executing → recording → completed
+                    ↘ cancelled                           ↘ rejected              ↘ failed
+                                                          ↘ later (requeue)
+                                                          ↘ timeout
+```
+
+## 快速开始
+
+### 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+### 配置环境变量
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入实际配置
+```
+
+### 运行
+
+```bash
+# 单进程模式（开发/测试，所有组件在同一进程）
+python main.py --mode standalone
+
+# 分布式模式（生产部署）
+python main.py --mode gateway          # 公网服务器：启动 API Gateway
+python main.py --mode filter-analysis  # 内网服务器：启动分析 Worker
+python main.py --mode decision         # 内网服务器：启动决策 Worker
+python main.py --mode execution        # 内网服务器：启动执行 Worker
+python main.py --mode recording        # 内网服务器：启动记录 Worker
+
+# 可选参数
+python main.py --dry-run               # 干跑模式（不实际执行代码）
+python main.py --config path/to/config.yaml  # 自定义配置文件
+python main.py --log-level DEBUG       # 日志级别
+```
+
+### 测试
+
+```bash
+# 运行所有单元测试
+pytest tests/ -v
+
+# 运行单个测试文件
+pytest tests/unit/test_gateway.py -v
+
+# 运行集成测试（需要先启动 gateway）
+pytest tests/ -v -m integration
+
+# 带覆盖率报告
+pytest tests/ -v --cov=src --cov-report=html
+```
+
+## 项目结构
+
+```
+.
+├── src/
+│   ├── gateway/                  # API Gateway
+│   │   ├── app.py               # FastAPI 应用
+│   │   ├── core/                # 核心组件
+│   │   │   ├── message_processor.py  # 消息校验与标准化
+│   │   │   ├── task_manager.py       # 任务状态管理
+│   │   │   ├── queue_manager.py      # 任务队列管理
+│   │   │   └── router.py             # 消息路由分发
+│   │   ├── dispatcher/          # 调度器
+│   │   │   ├── base.py               # 调度器基类
+│   │   │   ├── http_dispatcher.py    # HTTP 调度（分布式模式）
+│   │   │   └── inprocess_dispatcher.py  # 进程内调度（单进程模式）
+│   │   ├── models/              # 数据模型
+│   │   │   ├── messages.py           # 标准消息模型
+│   │   │   ├── tasks.py              # 任务状态模型
+│   │   │   └── requests.py           # API 请求模型
+│   │   └── routes/              # API 路由
+│   │       ├── listener.py           # 监听消息接口
+│   │       ├── feishu.py             # 飞书回调接口
+│   │       ├── decisions.py          # 决策接口
+│   │       ├── analysis.py           # 分析接口
+│   │       ├── execution.py          # 执行接口
+│   │       ├── recording.py          # 记录接口
+│   │       ├── tasks.py              # 任务查询接口
+│   │       └── queue.py              # 队列状态接口
+│   ├── workers/                  # 业务 Workers
+│   │   ├── filter_analysis/     # 分析 Worker
+│   │   │   ├── app.py                # FastAPI 应用
+│   │   │   └── handler.py            # 分析处理器
+│   │   ├── decision/            # 决策 Worker
+│   │   │   ├── app.py                # FastAPI 应用
+│   │   │   └── handler.py            # 决策处理器
+│   │   ├── execution/           # 执行 Worker
+│   │   │   ├── app.py                # FastAPI 应用
+│   │   │   └── handler.py            # 执行处理器
+│   │   └── recording/           # 记录 Worker
+│   │       ├── app.py                # FastAPI 应用
+│   │       └── handler.py            # 记录处理器
+│   ├── listener_push/            # 监听层推送客户端
+│   ├── config/                   # 配置管理
+│   ├── wechat_listener/          # 企业微信消息捕获
+│   ├── llm_router/               # LLM 智能路由
+│   ├── task_analyzer/            # 任务分析
+│   ├── code_executor/            # OpenCode 执行
+│   ├── feishu_recorder/          # 飞书记录
+│   ├── decision_manager/         # 用户决策确认
+│   ├── workflow_orchestrator/    # 旧版流程编排（兼容）
+│   ├── exceptions/               # 自定义异常
+│   └── utils/                    # 工具函数
+├── config/
+│   └── config.yaml               # 主配置文件
+├── tests/                        # 测试套件
+│   ├── unit/                     # 单元测试
+│   └── conftest.py               # 测试配置和 fixture
+├── docs/
+│   └── ARCHITECTURE_V2.md        # 架构设计文档
+├── main.py                       # 入口
+├── requirements.txt
+└── .env.example
+```
+
+## API 接口
+
+### Gateway API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/listener/msg` | 接收监听层消息 |
+| POST | `/api/v1/feishu/callback` | 飞书事件回调 |
+| POST | `/api/v1/decisions` | 提交用户决策 |
+| POST | `/api/v1/analysis/done` | 分析完成回调 |
+| POST | `/api/v1/execution/done` | 执行完成回调 |
+| POST | `/api/v1/execution/progress` | 执行进度更新 |
+| POST | `/api/v1/recording/done` | 记录完成回调 |
+| GET | `/api/v1/tasks/{task_id}` | 查询任务状态 |
+| GET | `/api/v1/tasks` | 列出所有任务 |
+| GET | `/api/v1/queue/status` | 队列状态 |
+| GET | `/health` | 健康检查 |
+
+## 核心模块
+
+| 模块 | 职责 | 关键类 |
+|------|------|--------|
+| **gateway** | API 网关，消息分发 | `MessageProcessor`, `TaskManager`, `QueueManager`, `MessageRouter` |
+| **workers/filter_analysis** | 消息过滤与任务分析 | `FilterAnalysisHandler` |
+| **workers/decision** | 用户决策确认 | `DecisionHandler` |
+| **workers/execution** | OpenCode 代码执行 | `ExecutionHandler` |
+| **workers/recording** | 飞书记录与通知 | `RecordingHandler` |
+| **llm_router** | LLM 智能路由 | `LLMRouter`, `OllamaProvider`, `ClaudeProvider` |
+| **task_analyzer** | 任务分析 | `TaskAnalyzer` |
+| **code_executor** | OpenCode 调用封装 | `CodeExecutor` |
+| **feishu_recorder** | 飞书多维表格 | `FeishuClient`, `TaskRecord` |
+| **config** | 配置管理 | `ConfigManager`, `AppConfig` |
+
+## LLM 混合调度策略
 
 | 复杂度 | 判断条件 | 路由 |
 |--------|----------|------|
-| **Simple** | 单一功能、明确技术栈、无复杂逻辑 | Ollama (本地) |
+| **Simple** | 单一功能、明确技术栈 | Ollama (本地) |
 | **Medium** | 2-3个功能点、需技术选型 | Ollama (本地) |
-| **Complex** | 多功能、复杂逻辑、需要架构设计 | Claude (云端) |
+| **Complex** | 多功能、复杂逻辑、需架构设计 | Claude/GPT (云端) |
 
-### Fallback机制
-如果Ollama不可用，自动切换到Claude/GPT云端API。
+Fallback: Ollama 不可用时自动切换到云端 API。
 
-## 六、消息过滤规则
-
-```yaml
-wechat:
-  filter:
-    include:
-      - "项目发布"
-      - "需求"
-      - "开发任务"
-      - "新功能"
-      - "做一个"
-    exclude:
-      - "测试"
-      - "[内部]"
-      - "demo"
-```
-
-## 七、飞书多维表格结构
+## 飞书多维表格字段
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
-| task_id | 文本 | 任务唯一ID (UUID) |
-| raw_message | 文本 | 原始消息内容 |
-| summary | 文本 | LLM生成的摘要 |
-| tech_stack | 多选 | 技术栈列表 |
-| core_features | 多选 | 核心功能点 |
-| status | 单选 | pending/approved/executing/completed/failed |
-| code_repo_url | 链接 | 代码仓库链接 |
-| created_at | 创建时间 | 创建时间 |
-| updated_at | 修改时间 | 更新时间 |
+| 任务 ID | 文本 | 任务唯一 ID |
+| 任务标题 | 文本 | LLM 生成的摘要 |
+| 任务描述 | 文本 | 原始消息 + 技术栈 + 功能点 |
+| 任务完成状态 | 复选框 | 是否完成 |
+| 代码仓库链接 | 链接 | OpenCode 生成的仓库 URL |
 
-### 状态流转
-```
-pending → approved → executing → completed
-                   ↘           → failed
-                     (取消)
-```
+## 配置管理
 
-## 八、配置管理
-
-所有敏感信息通过环境变量管理：
+所有敏感信息通过环境变量管理（参见 `.env.example`）：
 
 ```bash
+# 企业微信
+WECHAT_DEVICE_ID=xxx
+
 # 飞书
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
 FEISHU_TABLE_ID=xxx
+FEISHU_BITABLE_TOKEN=xxx
 
-# LLM - Claude
+# LLM
+OLLAMA_BASE_URL=http://localhost:11434
 ANTHROPIC_API_KEY=sk-ant-xxx
-
-# LLM - OpenAI (备用)
 OPENAI_API_KEY=sk-xxx
 
-# Ollama (本地)
-OLLAMA_BASE_URL=http://localhost:11434
+# OpenCode
+OPENCODE_API_URL=http://localhost:4096
+OPENCODE_WORK_DIR=./workspace
 
-# Webhook
-WECHAT_HOOK_TOKEN=xxx
+# Gateway
+GATEWAY_HOST=0.0.0.0
+GATEWAY_PORT=8000
 ```
 
-## 九、部署架构
+## 部署方案
 
-### 方案A: 云服务器 (推荐长期)
+### 方案 A: 单进程模式（开发/测试）
 
-云服务器 (1核1G, ~30元/月)
-├── TaskLoop应用 (FastAPI, 端口: 8080)
-├── Ollama (可选, 本地LLM, 端口: 11434)
-└── 公网IP/域名 → 企微Webhooks回调
-
-### 方案B: 本地 + 内网穿透 (免费)
-
-你的电脑 → 内网穿透工具 (frp/ngrok) → 公网URL → 企微Webhooks回调
-
-### 免费内网穿透工具
-
-| 工具 | 免费额度 | 适合场景 |
-|------|----------|----------|
-| ngrok | 1个隧道/分钟断开 | 开发测试 |
-| cpolar | 随机URL | 临时使用 |
-| frp | 完全免费 | 自建穿透 |
-| Cloudflare Tunnel | 免费 | 长期稳定 |
-
-## 十、文件结构
-
-```
-TaskLoop/
-├── src/
-│   ├── config/              # 配置管理
-│   │   ├── __init__.py
-│   │   └── manager.py      # ConfigManager
-│   ├── wechat_listener/    # Webhook接收
-│   │   ├── __init__.py
-│   │   ├── server.py       # FastAPI服务器
-│   │   └── parser.py       # 消息解析
-│   ├── llm_router/          # LLM调度
-│   │   ├── __init__.py
-│   │   ├── base.py         # 抽象基类
-│   │   ├── ollama.py       # Ollama Provider
-│   │   ├── anthropic.py   # Claude Provider
-│   │   └── router.py       # 路由逻辑
-│   ├── task_analyzer/       # 任务分析
-│   │   ├── __init__.py
-│   │   └── analyzer.py     # TaskAnalyzer
-│   ├── code_executor/       # OpenCode执行
-│   │   ├── __init__.py
-│   │   └── executor.py     # CodeExecutor
-│   ├── feishu_recorder/     # 飞书记录
-│   │   ├── __init__.py
-│   │   ├── client.py       # FeishuClient
-│   │   └── models.py       # TaskRecord
-│   ├── decision_manager/    # 决策确认
-│   │   ├── __init__.py
-│   │   └── manager.py      # DecisionManager
-│   ├── workflow_orchestrator/ # 流程编排
-│   │   ├── __init__.py
-│   │   └── orchestrator.py # WorkflowOrchestrator
-│   ├── utils/               # 工具函数
-│   │   └── __init__.py
-│   └── exceptions/          # 异常定义
-│       └── __init__.py
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── docs/
-├── config/
-│   └── config.yaml
-├── CLAUDE.md               # OpenCode上下文
-├── README.md
-├── requirements.txt
-├── .env.example
-└── main.py                 # 入口
+```bash
+python main.py --mode standalone
 ```
 
-## 十一、关键决策记录
+所有组件在同一进程内运行，通过进程内调度器通信，无需启动多个服务。
 
-| 决策项 | 选择 | 理由 |
-|--------|------|------|
-| 消息捕获 | Webhook | 官方支持、无封号风险、只需新消息 |
-| 代码Agent | OpenCode | 开源、多模型支持、本地LLM友好 |
-| LLM | 混合方案 | 简单任务用Ollama(免费快)、复杂用Claude |
-| 环境 | Windows | 符合用户环境 |
-| 规模 | 个人使用 | 无需复杂权限管理 |
+### 方案 B: 分布式模式（生产）
 
-## 十二、技术栈
+```
+公网服务器 (1核1G)
+├── API Gateway (python main.py --mode gateway)
+│   └── 接收: 企微消息、飞书回调、用户决策
+│
+内网服务器 A (GPU, 可选)
+├── 分析 Worker (python main.py --mode filter-analysis)
+│
+内网服务器 B
+├── 决策 Worker (python main.py --mode decision)
+├── 执行 Worker (python main.py --mode execution)
+├── 记录 Worker (python main.py --mode recording)
+```
+
+**优势**：
+- 网关部署在公网，飞书回调直接打到网关，**无需内网穿透**
+- 各 Worker 可按需独立扩展
+- 分析 Worker 可部署在 GPU 服务器上加速推理
+
+## 技术栈
 
 | 类别 | 技术 | 版本 |
 |------|------|------|
-| Web框架 | FastAPI | >=0.109.0 |
-| 飞书SDK | lark-oapi | >=1.3.0 |
+| Web 框架 | FastAPI | >=0.109.0 |
+| 飞书 SDK | lark-oapi | >=1.3.0 |
 | LLM SDK | openai, anthropic | >=1.12.0, >=0.20.0 |
 | 配置 | pydantic, pyyaml | >=2.6.0, >=6.0.1 |
 | 日志 | loguru | >=0.7.2 |
-| 测试 | pytest | >=8.0.0 |
+| 测试 | pytest, pytest-asyncio | >=8.0.0 |
+| HTTP 客户端 | httpx | >=0.27.0 |
 
-## 十三、安全考虑
+## 安全考虑
 
-### Webhook安全
-- ✅ 使用签名验证 (msg_signature)
-- ✅ 频率限制 (20条/分钟)
-- ✅ 不获取用户隐私信息
-
-### 凭证管理
-- ✅ 所有凭证通过环境变量管理
-- ✅ 不硬编码任何密钥
-- ✅ .env文件加入.gitignore
-
-### 执行安全
-- ✅ 命令白名单
-- ✅ 路径限制
-- ✅ 危险操作拦截
+- **Webhook 安全**：签名验证、频率限制
+- **凭证管理**：所有凭证通过环境变量管理，不硬编码密钥
+- **执行安全**：命令白名单、路径限制、危险操作拦截
+- **网关安全**：输入校验、去重防护、CORS 配置

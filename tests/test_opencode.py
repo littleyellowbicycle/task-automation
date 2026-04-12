@@ -8,6 +8,8 @@ python tests/test_opencode.py
 import os
 import sys
 
+import pytest
+
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
@@ -19,6 +21,7 @@ load_dotenv()
 import subprocess
 
 
+@pytest.mark.integration
 def test_wsl_connection():
     """测试 WSL 连接"""
     print("\n" + "=" * 60)
@@ -110,6 +113,7 @@ def test_wsl_connection():
     return True
 
 
+@pytest.mark.integration
 def test_executor():
     """测试 CodeExecutor"""
     print("\n" + "=" * 60)

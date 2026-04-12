@@ -90,9 +90,54 @@ class FeishuConfig(BaseModel):
 
 
 class GatewayConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8000
+    mode: Literal["standalone", "distributed"] = "standalone"
     dedup_enabled: bool = True
     dedup_max_cache: int = 1000
     dedup_ttl: int = 3600
+
+
+class WorkerUrlsConfig(BaseModel):
+    analysis_url: str = "http://localhost:8001"
+    decision_url: str = "http://localhost:8002"
+    execution_url: str = "http://localhost:8003"
+    recording_url: str = "http://localhost:8004"
+
+
+class FilterAnalysisWorkerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8001
+    gateway_url: str = "http://localhost:8000"
+
+
+class DecisionWorkerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8002
+    gateway_url: str = "http://localhost:8000"
+
+
+class ExecutionWorkerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8003
+    gateway_url: str = "http://localhost:8000"
+    opencode_host: str = "localhost"
+    opencode_port: int = 18792
+    work_dir: str = "./workspace"
+    timeout: int = 600
+
+
+class RecordingWorkerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8004
+    gateway_url: str = "http://localhost:8000"
+
+
+class ListenerPushConfig(BaseModel):
+    gateway_url: str = "http://localhost:8000"
+    timeout: float = 10.0
+    max_retries: int = 3
+    retry_delay: float = 1.0
 
 
 class FilterConfig(BaseModel):
@@ -168,6 +213,12 @@ class AppConfig(BaseModel):
     opencode: OpenCodeConfig = Field(default_factory=OpenCodeConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    worker_urls: WorkerUrlsConfig = Field(default_factory=WorkerUrlsConfig)
+    filter_analysis_worker: FilterAnalysisWorkerConfig = Field(default_factory=FilterAnalysisWorkerConfig)
+    decision_worker: DecisionWorkerConfig = Field(default_factory=DecisionWorkerConfig)
+    execution_worker: ExecutionWorkerConfig = Field(default_factory=ExecutionWorkerConfig)
+    recording_worker: RecordingWorkerConfig = Field(default_factory=RecordingWorkerConfig)
+    listener_push: ListenerPushConfig = Field(default_factory=ListenerPushConfig)
     filter: FilterConfig = Field(default_factory=FilterConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
     decision: DecisionConfig = Field(default_factory=DecisionConfig)

@@ -6,10 +6,13 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
+
 from src.callback_server import CallbackServer, Decision
 from src.executor import create_executor, ExecutorConfig
 
 
+@pytest.mark.integration
 async def test_callback_to_executor():
     print("=" * 60)
     print("Test: Callback -> Executor Integration")

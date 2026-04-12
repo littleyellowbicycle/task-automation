@@ -1,10 +1,11 @@
-"""Main entry point for WeChat Task Automation System."""
+"""Main entry point for WeChat Task Automation System v2."""
 
 import argparse
 import asyncio
 import sys
 from pathlib import Path
 
+import uvicorn
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,217 +13,324 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config.config_manager import ConfigManager
-from src.workflow_orchestrator import WorkflowOrchestrator
-from src.wechat_listener.factory import ListenerFactory
-from src.wechat_listener.base import ListenerType, Platform
-from src.monitoring import initialize_monitoring, MetricConfig, AlertConfig
-from src.feishu_recorder.feishu_bridge import FeishuBridge
-from src.feishu_recorder.server import create_feishu_server
+from src.config.models import AppConfig
 from src.utils import setup_logger, get_logger
 
 
 def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="WeChat Task Automation System"
-    )
+    parser = argparse.ArgumentParser(description="WeChat Task Automation System v2")
     parser.add_argument(
         "--mode",
-        choices=["normal", "test", "mock"],
-        default="normal",
-        help="Run mode (default: normal)"
+        choices=["standalone", "gateway", "filter-analysis", "decision", "execution", "recording", "listener"],
+        default="standalone",
+        help="Run mode (default: standalone)",
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Don't actually execute code generation"
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        help="Path to config.yaml"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Don't actually execute code generation")
+    parser.add_argument("--config", type=str, help="Path to config.yaml")
     parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
-        help="Logging level (default: INFO)"
+        help="Logging level (default: INFO)",
     )
     return parser.parse_args()
 
 
-async def test_workflow(orchestrator: WorkflowOrchestrator):
-    """Run a test workflow with mock message."""
-    from datetime import datetime
-    
-    # Create mock raw message
-    raw_message = {
-        "msg_id": "test_001",
-        "content": "项目发布：开发一个用户登录功能，使用 Python Flask 框架",
-        "sender_id": "user_001",
-        "sender_name": "Test User",
-        "conversation_id": "R:group_001",
-        "conversation_type": "group",
-        "timestamp": datetime.now(),
-        "msg_type": "text",
-    }
-    
-    # Process through workflow
-    result = await orchestrator.process_raw_message(raw_message)
-    print(f"\n=== Workflow test completed! ===")
-    if result:
-        print(f"Message processed: {result.msg_id}")
-        print(f"Content: {result.content[:100]}...")
-    else:
-        print("Message was filtered out")
-    
-    return result
+def run_standalone(config: AppConfig, dry_run: bool = False):
+    from src.gateway import create_gateway_app, InProcessDispatcher
+    from src.gateway.core import TaskManager, QueueManager, MessageRouter, MessageProcessor
+    from src.gateway.core.queue_manager import QueueConfig
+    from src.gateway.core.message_processor import DeduplicationConfig
 
+    from src.workers.filter_analysis.handler import FilterAnalysisHandler
+    from src.workers.decision.handler import DecisionHandler
+    from src.workers.execution.handler import ExecutionHandler
+    from src.workers.recording.handler import RecordingHandler
 
-async def main_async(args):
-    """Async main function."""
-    # Load configuration
-    try:
-        config = ConfigManager(config_path=args.config) if args.config else ConfigManager()
-    except FileNotFoundError as e:
-        print(f"❌ Configuration error: {e}")
-        sys.exit(1)
-    
-    # Setup logging
-    setup_logger(
-        log_dir=config.logging_dir,
-        log_level=args.log_level or config.logging_level,
-    )
-    logger = get_logger("main")
-    
-    logger.info("=" * 50)
-    logger.info("WeChat Task Automation System")
-    logger.info("=" * 50)
-    logger.info(f"Mode: {args.mode}")
-    logger.info(f"Dry run: {args.dry_run}")
-    
-    # Initialize monitoring service
-    metric_config = MetricConfig(
-        enabled=config.monitoring.enabled,
-        prometheus_port=config.monitoring.prometheus_port,
-        metrics_retention=config.monitoring.metrics_retention,
-        log_retention_days=config.monitoring.log_retention_days
-    )
-    
-    alert_config = AlertConfig(
-        enabled=config.monitoring.enabled,
-        feishu_webhook=config.monitoring.alert_webhook,
-        queue_threshold=config.monitoring.queue_threshold,
-        failure_threshold=config.monitoring.failure_threshold,
-        llm_timeout_threshold=30,
-        resource_threshold=90.0,
-        service_failure_threshold=3
-    )
-    
-    monitoring = initialize_monitoring(metric_config, alert_config)
-    asyncio.create_task(monitoring.start())
-    logger.info("Monitoring service initialized")
-    
-    # Initialize Feishu bridge
-    feishu_bridge = FeishuBridge(
-        app_id=config.feishu.app_id,
-        app_secret=config.feishu.app_secret,
-        table_id=config.feishu.table_id,
-        webhook_url=config.feishu.webhook_url
-    )
-    
-    # Start Feishu callback server
-    feishu_server = create_feishu_server(
-        host="0.0.0.0",
-        port=8000,
-        feishu_bridge=feishu_bridge
-    )
-    feishu_server.start()
-    logger.info("Feishu callback server initialized")
-    
-    # Initialize workflow orchestrator
-    orchestrator = WorkflowOrchestrator(
-        feishu_bridge=feishu_bridge,
-        dry_run=args.dry_run or args.mode in ["test", "mock"],
-    )
-    
-    if args.mode in ["test", "mock"]:
-        logger.info("Running in test/mock mode...")
-        result = await test_workflow(orchestrator)
-        logger.info("Test completed successfully!")
-        return
-    
-    # Normal mode: Start listening for WeChat messages
-    logger.info("Starting WeChat listener...")
-    logger.info(f"Listener type: {config.wechat.listener_type}")
-    logger.info(f"Platform: {config.wechat.platform}")
+    logger = get_logger("main.standalone")
 
-    # Create listener using factory
-    try:
-        listener_type = ListenerType(config.wechat.listener_type)
-        platform = Platform(config.wechat.platform)
-        listener = ListenerFactory.create(
-            listener_type=listener_type,
-            platform=platform,
-            keywords=config.task_filters.keywords,
-            regex_patterns=config.task_filters.regex_patterns,
-            poll_interval=config.wechat.uiautomation.poll_interval,
-            max_history=config.wechat.uiautomation.max_history,
+    dispatcher = InProcessDispatcher()
+
+    handler_analysis = FilterAnalysisHandler()
+    handler_decision = DecisionHandler(
+        gateway_url=f"http://localhost:{config.gateway.port}",
+        feishu_app_id=config.feishu.app_id,
+        feishu_app_secret=config.feishu.app_secret,
+        feishu_webhook_url=config.feishu.webhook_url,
+    )
+    handler_execution = ExecutionHandler(
+        gateway_url=f"http://localhost:{config.gateway.port}",
+        host=config.opencode.host,
+        port=config.opencode.port,
+        work_dir=config.opencode.work_dir,
+        timeout=config.opencode.timeout,
+    )
+    handler_recording = RecordingHandler(
+        gateway_url=f"http://localhost:{config.gateway.port}",
+        feishu_app_id=config.feishu.app_id,
+        feishu_app_secret=config.feishu.app_secret,
+        feishu_table_id=config.feishu.table_id,
+        feishu_webhook_url=config.feishu.webhook_url,
+    )
+
+    async def _on_analysis(task_id: str, content: str, msg_id: str = ""):
+        result = await handler_analysis.handle_analyze(task_id=task_id, content=content, msg_id=msg_id)
+        from src.gateway.models.tasks import TaskStatus
+
+        app = _get_app()
+        tm = app.state.task_manager
+        mr = app.state.message_router
+
+        if not result.get("is_task"):
+            tm.update_status(task_id, TaskStatus.CANCELLED, error=result.get("reason", "not_task"))
+            return
+
+        await mr.route_analysis_done(task_id, result)
+
+    async def _on_decision(task_id: str, task_record: dict, analysis: dict):
+        result = await handler_decision.handle_decision_request(
+            task_id=task_id, task_record=task_record, analysis=analysis
         )
-    except Exception as e:
-        logger.error(f"Failed to create listener: {e}")
-        sys.exit(1)
 
-    # Set up message callback
-    from src.wechat_listener.base import MessageCallback
-    
+    async def _on_decision_callback(task_id: str, action: str):
+        result = await handler_decision.handle_decision_callback(task_id=task_id, action=action)
+        app = _get_app()
+        mr = app.state.message_router
+        await mr.route_decision(task_id, action)
+
+    async def _on_execution(task_id: str, summary: str, raw_message: str = ""):
+        result = await handler_execution.handle_execution_request(
+            task_id=task_id, summary=summary, raw_message=raw_message
+        )
+
+    async def _on_recording(task_id: str, task_record: dict, success: bool, message: str = ""):
+        result = await handler_recording.handle_recording_request(
+            task_id=task_id, task_record=task_record, success=success, message=message
+        )
+
+    dispatcher.set_analysis_handler(_on_analysis)
+    dispatcher.set_decision_handler(_on_decision)
+    dispatcher.set_decision_callback_handler(_on_decision_callback)
+    dispatcher.set_execution_handler(_on_execution)
+    dispatcher.set_recording_handler(_on_recording)
+
+    app = create_gateway_app(
+        mode="standalone",
+        dedup_enabled=config.gateway.dedup_enabled,
+        dedup_max_cache=config.gateway.dedup_max_cache,
+        dedup_ttl=config.gateway.dedup_ttl,
+        queue_max_size=config.queue.max_size,
+        queue_confirmation_timeout=config.queue.confirmation_timeout,
+        dispatcher=dispatcher,
+    )
+
+    _app_ref = [app]
+
+    def _get_app():
+        return _app_ref[0]
+
+    logger.info(f"Starting standalone gateway on {config.gateway.host}:{config.gateway.port}")
+    uvicorn.run(app, host=config.gateway.host, port=config.gateway.port)
+
+
+def run_gateway(config: AppConfig):
+    from src.gateway import create_gateway_app
+
+    logger = get_logger("main.gateway")
+
+    app = create_gateway_app(
+        mode="distributed",
+        dedup_enabled=config.gateway.dedup_enabled,
+        dedup_max_cache=config.gateway.dedup_max_cache,
+        dedup_ttl=config.gateway.dedup_ttl,
+        queue_max_size=config.queue.max_size,
+        queue_confirmation_timeout=config.queue.confirmation_timeout,
+        analysis_url=config.worker_urls.analysis_url,
+        decision_url=config.worker_urls.decision_url,
+        execution_url=config.worker_urls.execution_url,
+        recording_url=config.worker_urls.recording_url,
+    )
+
+    logger.info(f"Starting gateway on {config.gateway.host}:{config.gateway.port}")
+    uvicorn.run(app, host=config.gateway.host, port=config.gateway.port)
+
+
+def run_filter_analysis_worker(config: AppConfig):
+    from src.workers.filter_analysis import create_filter_analysis_app
+
+    logger = get_logger("main.filter_analysis_worker")
+    app = create_filter_analysis_app(
+        gateway_url=config.filter_analysis_worker.gateway_url,
+        port=config.filter_analysis_worker.port,
+    )
+
+    logger.info(f"Starting filter-analysis worker on {config.filter_analysis_worker.host}:{config.filter_analysis_worker.port}")
+    uvicorn.run(app, host=config.filter_analysis_worker.host, port=config.filter_analysis_worker.port)
+
+
+def run_decision_worker(config: AppConfig):
+    from src.workers.decision import create_decision_app
+
+    logger = get_logger("main.decision_worker")
+    app = create_decision_app(
+        gateway_url=config.decision_worker.gateway_url,
+        port=config.decision_worker.port,
+        feishu_app_id=config.feishu.app_id,
+        feishu_app_secret=config.feishu.app_secret,
+        feishu_webhook_url=config.feishu.webhook_url,
+    )
+
+    logger.info(f"Starting decision worker on {config.decision_worker.host}:{config.decision_worker.port}")
+    uvicorn.run(app, host=config.decision_worker.host, port=config.decision_worker.port)
+
+
+def run_execution_worker(config: AppConfig):
+    from src.workers.execution import create_execution_app
+
+    logger = get_logger("main.execution_worker")
+    app = create_execution_app(
+        gateway_url=config.execution_worker.gateway_url,
+        port=config.execution_worker.port,
+        opencode_host=config.execution_worker.opencode_host,
+        opencode_port=config.execution_worker.opencode_port,
+        work_dir=config.execution_worker.work_dir,
+        timeout=config.execution_worker.timeout,
+    )
+
+    logger.info(f"Starting execution worker on {config.execution_worker.host}:{config.execution_worker.port}")
+    uvicorn.run(app, host=config.execution_worker.host, port=config.execution_worker.port)
+
+
+def run_recording_worker(config: AppConfig):
+    from src.workers.recording import create_recording_app
+
+    logger = get_logger("main.recording_worker")
+    app = create_recording_app(
+        gateway_url=config.recording_worker.gateway_url,
+        port=config.recording_worker.port,
+        feishu_app_id=config.feishu.app_id,
+        feishu_app_secret=config.feishu.app_secret,
+        feishu_table_id=config.feishu.table_id,
+        feishu_webhook_url=config.feishu.webhook_url,
+    )
+
+    logger.info(f"Starting recording worker on {config.recording_worker.host}:{config.recording_worker.port}")
+    uvicorn.run(app, host=config.recording_worker.host, port=config.recording_worker.port)
+
+
+def run_listener(config: AppConfig):
+    import asyncio
+
+    logger = get_logger("main.listener")
+
+    from src.listener_push import PushClient
+    from src.wechat_listener.factory import ListenerFactory
+    from src.wechat_listener.base import ListenerType, Platform, MessageCallback
+
+    push_client = PushClient(
+        gateway_url=config.listener_push.gateway_url,
+        timeout=config.listener_push.timeout,
+        max_retries=config.listener_push.max_retries,
+        retry_delay=config.listener_push.retry_delay,
+    )
+
     async def on_message_callback(message):
         logger.info(f"Message received: {message.content[:50] if message.content else ''}...")
         try:
-            raw_message = {
-                "msg_id": message.msg_id,
-                "content": message.content,
-                "sender_id": message.sender_id,
-                "sender_name": message.sender_name,
-                "conversation_id": message.conversation_id,
-                "conversation_type": "group" if message.conversation_type.value == "group" else "private",
-                "timestamp": message.timestamp,
-                "msg_type": message.msg_type.value if hasattr(message.msg_type, 'value') else "text",
-            }
-            await orchestrator.process_raw_message(
-                raw_message,
+            from datetime import datetime
+
+            result = await push_client.push_message(
+                content=message.content,
+                sender_id=message.sender_id,
+                sender_name=message.sender_name,
+                conversation_id=message.conversation_id,
+                conversation_type="group" if message.conversation_type.value == "group" else "private",
+                msg_id=message.msg_id,
+                msg_type=message.msg_type.value if hasattr(message.msg_type, "value") else "text",
                 platform=config.wechat.platform,
-                listener_type=config.wechat.listener_type
+                listener_type=config.wechat.listener_type,
+                timestamp=datetime.now().isoformat(),
+            )
+            logger.info(f"Push result: {result.get('code')} - task_id: {result.get('task_id')}")
+        except Exception as e:
+            logger.error(f"Error pushing message: {e}")
+
+    async def _run():
+        try:
+            listener_type = ListenerType(config.wechat.listener_type)
+            platform = Platform(config.wechat.platform)
+            listener = ListenerFactory.create(
+                listener_type=listener_type,
+                platform=platform,
+                keywords=config.task_filters.keywords,
+                regex_patterns=config.task_filters.regex_patterns,
+                poll_interval=config.wechat.uiautomation.poll_interval,
+                max_history=config.wechat.uiautomation.max_history,
             )
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
-    
-    listener.set_callback(MessageCallback(on_message=on_message_callback))
+            logger.error(f"Failed to create listener: {e}")
+            sys.exit(1)
 
-    # Start listening
-    try:
-        await listener.connect()
-        logger.info("Listener connected successfully")
-        
-        listener.start_background()
-        logger.info("Listener started in background")
-        
-        while listener.is_running:
-            await asyncio.sleep(1)
-            
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-        listener.disconnect()
-    except Exception as e:
-        logger.error(f"Failed to start listener: {e}")
-        logger.error("Make sure WeChat/WeWork is running and visible")
-        sys.exit(1)
+        listener.set_callback(MessageCallback(on_message=on_message_callback))
+
+        try:
+            await listener.connect()
+            logger.info("Listener connected successfully")
+            listener.start_background()
+            logger.info("Listener started in background, pushing to gateway")
+
+            while listener.is_running:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Shutting down listener...")
+            listener.disconnect()
+        except Exception as e:
+            logger.error(f"Failed to start listener: {e}")
+            sys.exit(1)
+
+    asyncio.run(_run())
 
 
 def main():
-    """Main entry point."""
     args = parse_args()
-    asyncio.run(main_async(args))
+
+    try:
+        config_manager = ConfigManager(config_path=args.config) if args.config else ConfigManager()
+        config = config_manager.config
+    except FileNotFoundError as e:
+        print(f"Configuration error: {e}")
+        sys.exit(1)
+
+    setup_logger(
+        log_dir=config.logging.dir,
+        log_level=args.log_level or config.logging.level,
+    )
+
+    logger = get_logger("main")
+    logger.info("=" * 50)
+    logger.info("WeChat Task Automation System v2")
+    logger.info("=" * 50)
+    logger.info(f"Mode: {args.mode}")
+
+    runners = {
+        "standalone": run_standalone,
+        "gateway": run_gateway,
+        "filter-analysis": run_filter_analysis_worker,
+        "decision": run_decision_worker,
+        "execution": run_execution_worker,
+        "recording": run_recording_worker,
+        "listener": run_listener,
+    }
+
+    runner = runners.get(args.mode)
+    if runner is None:
+        logger.error(f"Unknown mode: {args.mode}")
+        sys.exit(1)
+
+    if args.mode == "standalone":
+        runner(config, dry_run=args.dry_run)
+    else:
+        runner(config)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ import pytest
 from unittest.mock import Mock, patch
 
 from src.workflow_orchestrator import WorkflowOrchestrator, WorkflowState
-from src.gateway import MessageGateway, StandardMessage, SenderInfo, ConversationInfo
+from src.gateway.models.messages import StandardMessage, SenderInfo, ConversationInfo
+from src.gateway.core.message_processor import MessageProcessor
 from src.filter import TaskFilter, FilterResult, DeduplicationResult
 from src.queue import TaskQueue, TaskStatus
 from src.feishu_recorder.models import TaskRecord
