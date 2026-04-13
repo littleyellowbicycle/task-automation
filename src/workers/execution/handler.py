@@ -14,17 +14,23 @@ class ExecutionHandler:
     def __init__(
         self,
         gateway_url: str = "http://localhost:8000",
-        host: str = "localhost",
-        port: int = 18792,
-        work_dir: str = "/tmp/opencode_workspace",
+        api_url: str = "http://localhost:4096",
+        work_dir: str = "./workspace",
         timeout: int = 600,
+        model_provider: str = "opencode",
+        model_id: str = "minimax-m2.5-free",
+        host: str = "",
+        port: int = 0,
     ):
         self.gateway_url = gateway_url.rstrip("/")
         self.executor = CodeExecutor(
-            host=host,
-            port=port,
+            api_url=api_url,
             work_dir=work_dir,
             timeout=timeout,
+            model_provider=model_provider,
+            model_id=model_id,
+            host=host,
+            port=port,
         )
 
     async def handle_execution_request(
@@ -46,8 +52,8 @@ class ExecutionHandler:
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "repo_url": result.repo_url,
-                "files_created": [],
-                "files_modified": [],
+                "files_created": result.files_created,
+                "files_modified": result.files_modified,
                 "duration": result.duration,
                 "error_message": result.stderr if not result.success else None,
             }

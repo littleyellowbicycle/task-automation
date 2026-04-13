@@ -65,11 +65,6 @@ temp/
 *.key
 credentials.json
 
-# Node.js - third-party dependencies
-node_modules/
-third_party/nodejs/node_modules/
-package-lock.json
-
 # PaddleOCR models - large binary files
 models/
 
@@ -78,3 +73,6 @@ models/
 
 # Diagnostics scripts
 diagnose_*.py
+
+# Node.js - SDK dependencies (auto-installed at runtime)
+node_modules/

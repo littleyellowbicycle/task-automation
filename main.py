@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -57,13 +58,17 @@ def run_standalone(config: AppConfig, dry_run: bool = False):
         feishu_app_id=config.feishu.app_id,
         feishu_app_secret=config.feishu.app_secret,
         feishu_webhook_url=config.feishu.webhook_url,
+        feishu_user_id=config.feishu.user_id,
     )
     handler_execution = ExecutionHandler(
         gateway_url=f"http://localhost:{config.gateway.port}",
-        host=config.opencode.host,
-        port=config.opencode.port,
+        api_url=config.opencode.api_url or "http://localhost:4096",
         work_dir=config.opencode.work_dir,
         timeout=config.opencode.timeout,
+        model_provider=os.getenv("EXECUTOR_MODEL_PROVIDER", "opencode"),
+        model_id=os.getenv("EXECUTOR_MODEL_ID", "minimax-m2.5-free"),
+        host=config.opencode.host,
+        port=config.opencode.port,
     )
     handler_recording = RecordingHandler(
         gateway_url=f"http://localhost:{config.gateway.port}",
@@ -178,6 +183,7 @@ def run_decision_worker(config: AppConfig):
         feishu_app_id=config.feishu.app_id,
         feishu_app_secret=config.feishu.app_secret,
         feishu_webhook_url=config.feishu.webhook_url,
+        feishu_user_id=config.feishu.user_id,
     )
 
     logger.info(f"Starting decision worker on {config.decision_worker.host}:{config.decision_worker.port}")
@@ -191,10 +197,11 @@ def run_execution_worker(config: AppConfig):
     app = create_execution_app(
         gateway_url=config.execution_worker.gateway_url,
         port=config.execution_worker.port,
-        opencode_host=config.execution_worker.opencode_host,
-        opencode_port=config.execution_worker.opencode_port,
+        api_url=config.execution_worker.opencode_api_url or config.opencode.api_url,
         work_dir=config.execution_worker.work_dir,
         timeout=config.execution_worker.timeout,
+        model_provider=config.execution_worker.model_provider,
+        model_id=config.execution_worker.model_id,
     )
 
     logger.info(f"Starting execution worker on {config.execution_worker.host}:{config.execution_worker.port}")

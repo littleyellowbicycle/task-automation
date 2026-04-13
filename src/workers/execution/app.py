@@ -20,10 +20,13 @@ class ExecutionRequestModel(BaseModel):
 def create_execution_app(
     gateway_url: str = "http://localhost:8000",
     port: int = 8003,
-    opencode_host: str = "localhost",
-    opencode_port: int = 18792,
-    work_dir: str = "/tmp/opencode_workspace",
+    api_url: str = "http://localhost:4096",
+    work_dir: str = "./workspace",
     timeout: int = 600,
+    model_provider: str = "opencode",
+    model_id: str = "minimax-m2.5-free",
+    opencode_host: str = "",
+    opencode_port: int = 0,
 ) -> FastAPI:
     app = FastAPI(
         title="Execution Worker",
@@ -32,10 +35,13 @@ def create_execution_app(
 
     handler = ExecutionHandler(
         gateway_url=gateway_url,
-        host=opencode_host,
-        port=opencode_port,
+        api_url=api_url,
         work_dir=work_dir,
         timeout=timeout,
+        model_provider=model_provider,
+        model_id=model_id,
+        host=opencode_host,
+        port=opencode_port,
     )
 
     @app.post("/worker/execution/request")

@@ -73,17 +73,19 @@ class LLMConfig(BaseModel):
 
 
 class OpenCodeConfig(BaseModel):
-    mode: Literal["local", "remote"] = "remote"
+    mode: Literal["local", "remote", "api"] = "api"
     host: str = "localhost"
-    port: int = 18792
+    port: int = 4096
     work_dir: str = "./workspace"
     timeout: int = 3600
     interaction_timeout: int = 1800
     max_retries: int = 3
     retry_delay: int = 60
     cli_path: str = "opencode"
-    api_url: str = ""
+    api_url: str = "http://localhost:4096"
     api_key: str = ""
+    model_provider: str = "opencode"
+    model_id: str = "minimax-m2.5-free"
     allowed_commands: List[str] = ["create", "modify", "read"]
     forbidden_paths: List[str] = ["/etc", "/root", "/sys", "/proc"]
 
@@ -93,6 +95,7 @@ class FeishuConfig(BaseModel):
     app_secret: str = ""
     table_id: str = ""
     webhook_url: str = ""
+    user_id: str = ""
     token_refresh_buffer: int = 300
 
 
@@ -129,9 +132,12 @@ class ExecutionWorkerConfig(BaseModel):
     port: int = 8003
     gateway_url: str = "http://localhost:8000"
     opencode_host: str = "localhost"
-    opencode_port: int = 18792
+    opencode_port: int = 4096
+    opencode_api_url: str = "http://localhost:4096"
     work_dir: str = "./workspace"
     timeout: int = 600
+    model_provider: str = "opencode"
+    model_id: str = "minimax-m2.5-free"
 
 
 class RecordingWorkerConfig(BaseModel):

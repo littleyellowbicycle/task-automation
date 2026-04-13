@@ -28,6 +28,7 @@ class DecisionHandler:
         feishu_app_id: str = "",
         feishu_app_secret: str = "",
         feishu_webhook_url: str = "",
+        feishu_user_id: str = "",
         default_timeout: float = 10800.0,
     ):
         self.gateway_url = gateway_url.rstrip("/")
@@ -37,6 +38,7 @@ class DecisionHandler:
             app_secret=feishu_app_secret,
             webhook_url=feishu_webhook_url,
             callback_url=f"{gateway_url}/api/v1/feishu/callback",
+            user_id=feishu_user_id,
         )
         self._pending: Dict[str, PendingConfirmation] = {}
 

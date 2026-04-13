@@ -38,8 +38,11 @@ class ConfigManager:
         self._merge_env("FEISHU_APP_SECRET", path=["feishu"], key="app_secret")
         self._merge_env("FEISHU_TABLE_ID", path=["feishu"], key="table_id")
         self._merge_env("FEISHU_WEBHOOK_URL", path=["feishu"], key="webhook_url")
+        self._merge_env("FEISHU_USER_ID", path=["feishu"], key="user_id")
         self._merge_env("OPENCODE_API_URL", path=["opencode"], key="api_url")
         self._merge_env("OPENCODE_API_KEY", path=["opencode"], key="api_key")
+        self._merge_env("EXECUTOR_MODEL_PROVIDER", path=["opencode"], key="model_provider")
+        self._merge_env("EXECUTOR_MODEL_ID", path=["opencode"], key="model_id")
         self._merge_env("FEISHU_ALERT_WEBHOOK", path=["monitoring"], key="alert_webhook")
 
     def _merge_env(self, env_key: str, path: List[str], key: str) -> None:
@@ -99,17 +102,19 @@ class ConfigManager:
                 },
             },
             "opencode": {
-                "mode": "remote",
+                "mode": "api",
                 "host": "localhost",
-                "port": 18792,
+                "port": 4096,
                 "work_dir": "./workspace",
                 "timeout": 3600,
                 "interaction_timeout": 1800,
                 "max_retries": 3,
                 "retry_delay": 60,
                 "cli_path": "opencode",
-                "api_url": "",
+                "api_url": "http://localhost:4096",
                 "api_key": "",
+                "model_provider": "opencode",
+                "model_id": "minimax-m2.5-free",
                 "allowed_commands": ["create", "modify", "read"],
                 "forbidden_paths": ["/etc", "/root", "/sys", "/proc"],
             },
@@ -300,17 +305,19 @@ class ConfigManager:
     def opencode(self) -> SimpleNamespace:
         o = self._config.get("opencode", {})
         return SimpleNamespace(
-            mode=o.get("mode", "remote"),
+            mode=o.get("mode", "api"),
             host=o.get("host", "localhost"),
-            port=o.get("port", 18792),
+            port=o.get("port", 4096),
             work_dir=o.get("work_dir", "./workspace"),
             timeout=o.get("timeout", 3600),
             interaction_timeout=o.get("interaction_timeout", 1800),
             max_retries=o.get("max_retries", 3),
             retry_delay=o.get("retry_delay", 60),
             cli_path=o.get("cli_path", "opencode"),
-            api_url=o.get("api_url", ""),
+            api_url=o.get("api_url", "http://localhost:4096"),
             api_key=o.get("api_key", ""),
+            model_provider=o.get("model_provider", "opencode"),
+            model_id=o.get("model_id", "minimax-m2.5-free"),
             allowed_commands=o.get("allowed_commands", ["create", "modify", "read"]),
             forbidden_paths=o.get("forbidden_paths", ["/etc", "/root", "/sys", "/proc"]),
         )
@@ -323,6 +330,7 @@ class ConfigManager:
             app_secret=f.get("app_secret", ""),
             table_id=f.get("table_id", ""),
             webhook_url=f.get("webhook_url", ""),
+            user_id=f.get("user_id", ""),
             token_refresh_buffer=f.get("token_refresh_buffer", 300),
         )
 
