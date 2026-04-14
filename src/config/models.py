@@ -96,6 +96,7 @@ class FeishuConfig(BaseModel):
     table_id: str = ""
     webhook_url: str = ""
     user_id: str = ""
+    use_websocket: bool = False
     token_refresh_buffer: int = 300
 
 

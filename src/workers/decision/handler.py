@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from ...feishu_recorder.feishu_bridge import FeishuBridge
 from ...feishu_recorder.models import TaskRecord, TaskStatus
@@ -29,6 +29,7 @@ class DecisionHandler:
         feishu_app_secret: str = "",
         feishu_webhook_url: str = "",
         feishu_user_id: str = "",
+        feishu_use_websocket: bool = False,
         default_timeout: float = 10800.0,
     ):
         self.gateway_url = gateway_url.rstrip("/")
@@ -39,6 +40,7 @@ class DecisionHandler:
             webhook_url=feishu_webhook_url,
             callback_url=f"{gateway_url}/api/v1/feishu/callback",
             user_id=feishu_user_id,
+            use_websocket=feishu_use_websocket,
         )
         self._pending: Dict[str, PendingConfirmation] = {}
 
@@ -59,7 +61,7 @@ class DecisionHandler:
             user_name=task_record.get("user_name"),
         )
 
-        callback_url = f"{self.gateway_url}/api/v1/feishu/callback"
+        callback_url = self.feishu_bridge.get_callback_url()
         self.feishu_bridge.send_approval_card(record, callback_url=callback_url)
 
         self._pending[task_id] = PendingConfirmation(

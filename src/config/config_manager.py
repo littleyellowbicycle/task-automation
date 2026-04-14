@@ -39,6 +39,7 @@ class ConfigManager:
         self._merge_env("FEISHU_TABLE_ID", path=["feishu"], key="table_id")
         self._merge_env("FEISHU_WEBHOOK_URL", path=["feishu"], key="webhook_url")
         self._merge_env("FEISHU_USER_ID", path=["feishu"], key="user_id")
+        self._merge_env_bool("FEISHU_USE_WEBSOCKET", path=["feishu"], key="use_websocket")
         self._merge_env("OPENCODE_API_URL", path=["opencode"], key="api_url")
         self._merge_env("OPENCODE_API_KEY", path=["opencode"], key="api_key")
         self._merge_env("EXECUTOR_MODEL_PROVIDER", path=["opencode"], key="model_provider")
@@ -51,6 +52,14 @@ class ConfigManager:
             for p in path:
                 ref = ref.setdefault(p, {})
             ref[key] = os.environ[env_key]
+
+    def _merge_env_bool(self, env_key: str, path: List[str], key: str) -> None:
+        if env_key in os.environ:
+            ref = self._config
+            for p in path:
+                ref = ref.setdefault(p, {})
+            val = os.environ[env_key].strip().lower()
+            ref[key] = val in ("true", "1", "yes", "on")
 
     def set_defaults(self) -> None:
         defaults = {
@@ -331,6 +340,7 @@ class ConfigManager:
             table_id=f.get("table_id", ""),
             webhook_url=f.get("webhook_url", ""),
             user_id=f.get("user_id", ""),
+            use_websocket=f.get("use_websocket", False),
             token_refresh_buffer=f.get("token_refresh_buffer", 300),
         )
 
