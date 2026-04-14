@@ -59,6 +59,7 @@ def run_standalone(config: AppConfig, dry_run: bool = False):
         feishu_app_secret=config.feishu.app_secret,
         feishu_webhook_url=config.feishu.webhook_url,
         feishu_user_id=config.feishu.user_id,
+        feishu_use_websocket=config.feishu.use_websocket,
     )
     handler_execution = ExecutionHandler(
         gateway_url=f"http://localhost:{config.gateway.port}",
@@ -127,6 +128,9 @@ def run_standalone(config: AppConfig, dry_run: bool = False):
         queue_max_size=config.queue.max_size,
         queue_confirmation_timeout=config.queue.confirmation_timeout,
         dispatcher=dispatcher,
+        feishu_use_websocket=config.feishu.use_websocket,
+        feishu_app_id=config.feishu.app_id,
+        feishu_app_secret=config.feishu.app_secret,
     )
 
     _app_ref = [app]
@@ -154,6 +158,9 @@ def run_gateway(config: AppConfig):
         decision_url=config.worker_urls.decision_url,
         execution_url=config.worker_urls.execution_url,
         recording_url=config.worker_urls.recording_url,
+        feishu_use_websocket=config.feishu.use_websocket,
+        feishu_app_id=config.feishu.app_id,
+        feishu_app_secret=config.feishu.app_secret,
     )
 
     logger.info(f"Starting gateway on {config.gateway.host}:{config.gateway.port}")
@@ -184,6 +191,7 @@ def run_decision_worker(config: AppConfig):
         feishu_app_secret=config.feishu.app_secret,
         feishu_webhook_url=config.feishu.webhook_url,
         feishu_user_id=config.feishu.user_id,
+        feishu_use_websocket=config.feishu.use_websocket,
     )
 
     logger.info(f"Starting decision worker on {config.decision_worker.host}:{config.decision_worker.port}")

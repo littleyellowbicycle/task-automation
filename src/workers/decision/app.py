@@ -30,6 +30,7 @@ def create_decision_app(
     feishu_app_secret: str = "",
     feishu_webhook_url: str = "",
     feishu_user_id: str = "",
+    feishu_use_websocket: bool = False,
 ) -> FastAPI:
     app = FastAPI(
         title="Decision Worker",
@@ -42,7 +43,10 @@ def create_decision_app(
         feishu_app_secret=feishu_app_secret,
         feishu_webhook_url=feishu_webhook_url,
         feishu_user_id=feishu_user_id,
+        feishu_use_websocket=feishu_use_websocket,
     )
+
+    app.state.handler = handler
 
     @app.post("/worker/decision/request")
     async def decision_request(request: DecisionRequestModel):

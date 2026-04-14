@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from ...feishu_recorder.feishu_bridge import FeishuBridge
 from ...feishu_recorder.models import TaskRecord, TaskStatus
