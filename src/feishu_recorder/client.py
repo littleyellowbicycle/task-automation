@@ -311,6 +311,33 @@ class FeishuClient:
 
     def create_task_card(self, task_record: TaskRecord, callback_url: Optional[str] = None) -> Dict[str, Any]:
         """Create a task approval card with interactive buttons."""
+        use_callback = callback_url is not None
+
+        approve_button: Dict[str, Any] = {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "✅ 确认"},
+            "type": "primary",
+        }
+        reject_button: Dict[str, Any] = {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "❌ 取消"},
+            "type": "danger",
+        }
+        later_button: Dict[str, Any] = {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "⏸️ 稍后"},
+            "type": "default",
+        }
+
+        if use_callback:
+            approve_button["url"] = f"{callback_url}/decision?task_id={task_record.task_id}&action=approve"
+            reject_button["url"] = f"{callback_url}/decision?task_id={task_record.task_id}&action=reject"
+            later_button["url"] = f"{callback_url}/decision?task_id={task_record.task_id}&action=later"
+        else:
+            approve_button["value"] = {"task_id": task_record.task_id, "action": "approve"}
+            reject_button["value"] = {"task_id": task_record.task_id, "action": "reject"}
+            later_button["value"] = {"task_id": task_record.task_id, "action": "later"}
+
         card = {
             "type": "interactive",
             "config": {
@@ -357,35 +384,7 @@ class FeishuClient:
                 },
                 {
                     "tag": "action",
-                    "actions": [
-                        {
-                            "tag": "button",
-                            "text": {
-                                "tag": "plain_text",
-                                "content": "✅ 确认"
-                            },
-                            "type": "primary",
-                            "url": f"{self.callback_url}/decision?task_id={task_record.task_id}&action=approve"
-                        },
-                        {
-                            "tag": "button",
-                            "text": {
-                                "tag": "plain_text",
-                                "content": "❌ 取消"
-                            },
-                            "type": "danger",
-                            "url": f"{self.callback_url}/decision?task_id={task_record.task_id}&action=reject"
-                        },
-                        {
-                            "tag": "button",
-                            "text": {
-                                "tag": "plain_text",
-                                "content": "⏸️ 稍后"
-                            },
-                            "type": "default",
-                            "url": f"{self.callback_url}/decision?task_id={task_record.task_id}&action=later"
-                        }
-                    ]
+                    "actions": [approve_button, reject_button, later_button]
                 }
             ]
         }

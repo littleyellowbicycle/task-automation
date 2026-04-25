@@ -1,17 +1,93 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import threading
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 import lark_oapi as lark
+from lark_oapi.event.callback.model.p2_card_action_trigger import (
+    P2CardActionTrigger,
+    P2CardActionTriggerResponse,
+)
 from lark_oapi.ws import Client as WSClient
+from lark_oapi.ws.client import MessageType
 
 from ..utils import get_logger
 
 logger = get_logger("feishu_ws_client")
+
+
+def _patch_ws_client_card_handler() -> None:
+    original_handle_data_frame = WSClient._handle_data_frame
+
+    async def patched_handle_data_frame(self, frame):
+        from lark_oapi.ws.client import (
+            HEADER_MESSAGE_ID,
+            HEADER_TRACE_ID,
+            HEADER_SUM,
+            HEADER_SEQ,
+            HEADER_TYPE,
+            HEADER_BIZ_RT,
+            UTF_8,
+            Frame,
+            FrameType,
+            Response,
+            _get_by_key,
+        )
+        import base64
+        import http
+        import time
+        from lark_oapi.core.model import JSON
+
+        hs = frame.headers
+        msg_id = _get_by_key(hs, HEADER_MESSAGE_ID)
+        trace_id = _get_by_key(hs, HEADER_TRACE_ID)
+        sum_ = _get_by_key(hs, HEADER_SUM)
+        seq = _get_by_key(hs, HEADER_SEQ)
+        type_ = _get_by_key(hs, HEADER_TYPE)
+
+        pl = frame.payload
+        if int(sum_) > 1:
+            pl = self._combine(msg_id, int(sum_), int(seq), pl)
+            if pl is None:
+                return
+
+        message_type = MessageType(type_)
+        logger.debug(
+            f"[WSClient] receive message, message_type: {message_type.value}, "
+            f"message_id: {msg_id}, trace_id: {trace_id}"
+        )
+
+        resp = Response(code=http.HTTPStatus.OK)
+        try:
+            start = int(round(time.time() * 1000))
+            if message_type == MessageType.EVENT:
+                result = self._event_handler.do_without_validation(pl)
+            elif message_type == MessageType.CARD:
+                result = self._event_handler.do_without_validation(pl)
+            else:
+                return
+            end = int(round(time.time() * 1000))
+            header = hs.add()
+            header.key = HEADER_BIZ_RT
+            header.value = str(end - start)
+            if result is not None:
+                resp.data = base64.b64encode(JSON.marshal(result).encode(UTF_8))
+        except Exception as e:
+            logger.error(
+                f"[WSClient] handle message failed, message_type: {message_type.value}, "
+                f"message_id: {msg_id}, trace_id: {trace_id}, err: {e}"
+            )
+            resp = Response(code=http.HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        frame.payload = JSON.marshal(resp).encode(UTF_8)
+        await self._write_message(frame.SerializeToString())
+
+    WSClient._handle_data_frame = patched_handle_data_frame
+
+
+_patch_ws_client_card_handler()
 
 
 class FeishuWSClient:
@@ -37,73 +113,47 @@ class FeishuWSClient:
 
     def _build_event_handler(self) -> lark.EventDispatcherHandler:
         builder = lark.EventDispatcherHandler.builder("", "")
-        builder = builder.register_p2_card_action_trigger_v1(
-            self._handle_card_action_v2
-        )
-        builder = builder.register_p1_customized_event(
-            "card.action.trigger",
-            self._handle_card_action_v1
+        builder = builder.register_p2_card_action_trigger(
+            self._handle_card_action_p2
         )
         return builder.build()
 
-    def _handle_card_action_v2(self, data: lark.card.v1.P2CardActionTriggerV1) -> None:
+    def _handle_card_action_p2(self, data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
         try:
-            logger.info(f"Received card action v2: {lark.JSON.marshal(data, indent=4)}")
+            logger.info("Received card action via WebSocket (P2)")
 
-            action = data.event.action
-            if action and action.value:
-                value = action.value
-                task_id = value.get("task_id")
-                action_type = value.get("action")
+            event = data.event
+            if not event or not event.action or not event.action.value:
+                logger.warning("Card action event missing action value")
+                return P2CardActionTriggerResponse()
 
-                logger.info(f"Card action: task_id={task_id}, action={action_type}")
+            value = event.action.value
+            task_id = value.get("task_id", "")
+            action_type = value.get("action", "")
 
-                for handler in self._card_handlers:
-                    try:
-                        result = {
-                            "task_id": task_id,
-                            "action": action_type,
-                            "raw_data": data,
-                        }
-                        if asyncio.iscoroutinefunction(handler):
-                            asyncio.run(handler(result))
-                        else:
-                            handler(result)
-                    except Exception as e:
-                        logger.error(f"Card handler error: {e}")
-
-        except Exception as e:
-            logger.error(f"Error handling card action v2: {e}")
-
-    def _handle_card_action_v1(self, data: lark.CustomizedEvent) -> None:
-        try:
-            logger.info(f"Received card action v1: {lark.JSON.marshal(data, indent=4)}")
-
-            body = json.loads(data.body) if isinstance(data.body, str) else data.body
-
-            action = body.get("action", {})
-            value = action.get("value", {})
-            task_id = value.get("task_id")
-            action_type = value.get("action")
-
-            logger.info(f"Card action v1: task_id={task_id}, action={action_type}")
+            logger.info(f"Card action: task_id={task_id}, action={action_type}")
 
             for handler in self._card_handlers:
                 try:
                     result = {
                         "task_id": task_id,
                         "action": action_type,
-                        "raw_data": body,
                     }
                     if asyncio.iscoroutinefunction(handler):
-                        asyncio.run(handler(result))
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(handler(result))
+                        except RuntimeError:
+                            asyncio.run(handler(result))
                     else:
                         handler(result)
                 except Exception as e:
                     logger.error(f"Card handler error: {e}")
 
         except Exception as e:
-            logger.error(f"Error handling card action v1: {e}")
+            logger.error(f"Error handling card action: {e}")
+
+        return P2CardActionTriggerResponse()
 
     def on_card_action(
         self,
@@ -168,7 +218,6 @@ class FeishuWSClientAsync:
             log_level=log_level,
         )
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._queue: asyncio.Queue = asyncio.Queue()
 
     def on_card_action(
         self,
