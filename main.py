@@ -274,14 +274,43 @@ def run_listener(config: AppConfig):
         try:
             listener_type = ListenerType(config.wechat.listener_type)
             platform = Platform(config.wechat.platform)
-            listener = ListenerFactory.create(
-                listener_type=listener_type,
-                platform=platform,
-                keywords=config.task_filters.keywords,
-                regex_patterns=config.task_filters.regex_patterns,
-                poll_interval=config.wechat.uiautomation.poll_interval,
-                max_history=config.wechat.uiautomation.max_history,
-            )
+            if listener_type == ListenerType.OCR:
+                listener = ListenerFactory.create(
+                    listener_type=listener_type,
+                    platform=platform,
+                    keywords=config.task_filters.keywords,
+                    regex_patterns=config.task_filters.regex_patterns,
+                    poll_interval=config.wechat.ocr.poll_interval,
+                    crop_ratio=tuple(config.wechat.ocr.crop_ratio),
+                    message_region_height=config.wechat.ocr.message_region_height,
+                )
+            elif listener_type == ListenerType.NTWORK:
+                listener = ListenerFactory.create(
+                    listener_type=listener_type,
+                    platform=platform,
+                    keywords=config.task_filters.keywords,
+                    regex_patterns=config.task_filters.regex_patterns,
+                    device_id=config.wechat.ntwork.device_id,
+                    ip=config.wechat.ntwork.ip,
+                    port=config.wechat.ntwork.port,
+                    smart_mode=config.wechat.ntwork.smart_mode,
+                )
+            elif listener_type == ListenerType.UIAUTOMATION:
+                listener = ListenerFactory.create(
+                    listener_type=listener_type,
+                    platform=platform,
+                    keywords=config.task_filters.keywords,
+                    regex_patterns=config.task_filters.regex_patterns,
+                    poll_interval=config.wechat.uiautomation.poll_interval,
+                    max_history=config.wechat.uiautomation.max_history,
+                )
+            else:
+                listener = ListenerFactory.create(
+                    listener_type=listener_type,
+                    platform=platform,
+                    keywords=config.task_filters.keywords,
+                    regex_patterns=config.task_filters.regex_patterns,
+                )
         except Exception as e:
             logger.error(f"Failed to create listener: {e}")
             sys.exit(1)

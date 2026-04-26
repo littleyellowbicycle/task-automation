@@ -36,6 +36,14 @@ except ImportError:
     ImageGrab = None
     Image = None
 
+WINDOWS_API_AVAILABLE = False
+try:
+    import ctypes
+    from ctypes import wintypes
+    WINDOWS_API_AVAILABLE = True
+except ImportError:
+    ctypes = None
+
 UIAUTOMATION_AVAILABLE = False
 try:
     import uiautomation as auto
@@ -213,10 +221,83 @@ class OCRListener(BaseListener):
         region = (msg_left, msg_top, msg_right, msg_bottom)
 
         try:
-            screenshot = ImageGrab.grab(bbox=region)
+            screenshot = self._grab_window(bbox=region)
             return screenshot
         except Exception as e:
             logger.error(f"Screenshot capture failed: {e}")
+            return None
+
+    def _grab_window(self, bbox: Optional[Tuple[int, int, int, int]] = None) -> Optional[Any]:
+        if not WINDOWS_API_AVAILABLE or not self._wechat_window:
+            if PIL_AVAILABLE and ImageGrab:
+                return ImageGrab.grab(bbox=bbox) if bbox else ImageGrab.grab()
+            return None
+
+        try:
+            hwnd_val = int(self._wechat_window.NativeWindowHandle)
+            if not hwnd_val:
+                return None
+
+            left, top, right, bottom = self._window_rect
+            width = right - left
+            height = bottom - top
+
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+
+            HWND = ctypes.c_void_p
+            hwnd = HWND(hwnd_val)
+
+            hwndDC = user32.GetWindowDC(hwnd)
+            mfcDC = gdi32.CreateCompatibleDC(hwndDC)
+            saveBitMap = gdi32.CreateCompatibleBitmap(hwndDC, width, height)
+            gdi32.SelectObject(mfcDC, saveBitMap)
+
+            user32.PrintWindow(hwnd, mfcDC, 2)
+
+            class BITMAPINFOHEADER(ctypes.Structure):
+                _fields_ = [
+                    ('biSize', ctypes.c_uint32),
+                    ('biWidth', ctypes.c_long),
+                    ('biHeight', ctypes.c_long),
+                    ('biPlanes', ctypes.c_short),
+                    ('biBitCount', ctypes.c_short),
+                    ('biCompression', ctypes.c_uint32),
+                    ('biSizeImage', ctypes.c_uint32),
+                    ('biXPelsPerMeter', ctypes.c_long),
+                    ('biYPelsPerMeter', ctypes.c_long),
+                    ('biClrUsed', ctypes.c_uint32),
+                    ('biClrImportant', ctypes.c_uint32),
+                ]
+
+            bmih = BITMAPINFOHEADER()
+            bmih.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmih.biWidth = width
+            bmih.biHeight = -height
+            bmih.biPlanes = 1
+            bmih.biBitCount = 32
+
+            buf = ctypes.create_string_buffer(width * height * 4)
+            gdi32.GetDIBits(mfcDC, saveBitMap, 0, height, buf, ctypes.byref(bmih), 0)
+
+            import numpy as np
+            arr = np.frombuffer(buf, dtype=np.uint8).reshape((height, width, 4))
+            img = Image.fromarray(arr, 'RGBA')
+
+            user32.ReleaseDC(hwnd, hwndDC)
+            gdi32.DeleteObject(saveBitMap)
+            gdi32.DeleteDC(mfcDC)
+
+            if bbox:
+                bl, bt, br, bb = bbox
+                img = img.crop((bl - left, bt - top, br - left, bb - top))
+
+            return img
+
+        except Exception as e:
+            logger.error(f"PrintWindow capture failed: {e}")
+            if PIL_AVAILABLE and ImageGrab:
+                return ImageGrab.grab(bbox=bbox) if bbox else ImageGrab.grab()
             return None
 
     def _ocr_extract(self, image: Any) -> List[Dict[str, Any]]:
@@ -455,3 +536,78 @@ class OCRListener(BaseListener):
     def send_text(self, conversation_id: str, content: str) -> bool:
         logger.warning("OCR listener does not support sending messages")
         return False
+
+    def calibrate(self, crop_ratio: Tuple[float, float, float, float]) -> bool:
+        self._crop_ratio = crop_ratio
+        logger.info(f"Calibrated crop_ratio: {crop_ratio}")
+
+        screenshot = self._capture_message_region()
+        if screenshot:
+            screenshot.save("debug/calibrate_result.png")
+            logger.info("Calibration screenshot saved to debug/calibrate_result.png")
+            return True
+        return False
+
+    def capture_full_window(self) -> Optional[Any]:
+        if not self._window_rect:
+            return None
+        try:
+            return self._grab_window()
+        except Exception as e:
+            logger.error(f"Full window capture failed: {e}")
+            return None
+
+    def auto_calibrate(self) -> Tuple[float, float, float, float]:
+        logger.info("Starting auto-calibration...")
+        full_window = self.capture_full_window()
+        if not full_window:
+            logger.error("Cannot capture full window")
+            return self._crop_ratio
+
+        import numpy as np
+        img_array = np.array(full_window)
+        height, width = img_array.shape[:2]
+
+        is_dark = np.mean(img_array) < 50
+        if is_dark:
+            logger.warning("Window appears dark, trying PrintWindow capture...")
+            full_window = self._grab_window()
+            if full_window:
+                img_array = np.array(full_window)
+                height, width = img_array.shape[:2]
+                if np.mean(img_array) < 50:
+                    logger.error("PrintWindow also returned dark image")
+                    return self._crop_ratio
+
+        lines = self._ocr_extract(full_window)
+        if not lines:
+            logger.warning("No text detected, using default message area scan...")
+            crop_ratio = (0.20, 0.02, 0.98, 0.85)
+            logger.info(f"Using default crop: {crop_ratio}")
+            self.calibrate(crop_ratio)
+            return crop_ratio
+
+        ys = [l["y"] for l in lines]
+        xs = [l["x"] for l in lines]
+
+        min_y, max_y = min(ys), max(ys)
+        min_x, max_x = min(xs), max(xs)
+
+        crop_ratio = (
+            float(min_x / width),
+            float(min_y / height),
+            float(max_x / width),
+            float(max_y / height),
+        )
+
+        margin = 0.02
+        crop_ratio = (
+            max(0, crop_ratio[0] - margin),
+            max(0, crop_ratio[1] - margin),
+            min(1, crop_ratio[2] + margin),
+            min(1, crop_ratio[3] + margin),
+        )
+
+        logger.info(f"Auto-calibration result: {crop_ratio}")
+        self.calibrate(crop_ratio)
+        return crop_ratio

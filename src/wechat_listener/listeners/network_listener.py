@@ -84,11 +84,11 @@ class NtWorkListener(BaseListener):
             
             self._ntwork.open(smart=self.smart_mode)
             self._ntwork.wait_login()
-            
+
             login_info = self._ntwork.get_login_info()
             logger.info(f"Logged in as: {login_info}")
-            
-            self._ntwork.on(ntwork.MT_ALL, self._handle_ntwork_message)
+
+            self._ntwork.msg_register(ntwork.MT_RECV_TEXT_MSG, self._handle_ntwork_message)
             
             self._running = True
             logger.info(f"NtWork listener connected for {self.platform.value}")

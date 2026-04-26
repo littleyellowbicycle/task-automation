@@ -1,5 +1,5 @@
 wechat:
-  listener_type: "ocr"
+  listener_type: "ntwork"
   platform: "wework"
   device_id: ""
   ip: "127.0.0.1"
